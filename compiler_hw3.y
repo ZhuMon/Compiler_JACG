@@ -11,6 +11,7 @@ extern void yyerror(char*);
 extern char* yytext;   // Get current token from lex
 extern char buf[BUF_SIZE];  // Get current code line from lex
 extern char error_buf[BUF_SIZE]; // Pass error message to lex
+char j_buf[256]; // Store jasmin code
 
 FILE *file; //To generate .j file for Jasmin
 
@@ -33,10 +34,17 @@ struct symbol_table *head;
 /* Symbol table function - you can add new function if needed. */
 int lookup_symbol(char* name, int declare_or_use, int define_function_or_not);
 struct symbol_table *create_symbol(int scope);
-void insert_symbol(char *name, int kind, int type, int pa, int scope);
+struct symbol * insert_symbol(char *name, int kind, int type, int pa, int scope);
 void dump_symbol(int scope);
 void free_table(struct symbol_table *);
 int intlen(int a);
+struct symbol * find_symbol(char *name, int scope);
+
+void ge_field(char *name, int type, int value_type, float value);
+void ge_method(char *name, int type, int return_type);
+struct symbol * load_var(char *name);
+struct symbol * store_var(char *name);
+char type_i2c(int type);
 
 int g_scope; //for parsing, calculate scope
 int print_table_flag = 0;
@@ -54,7 +62,7 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
     int i_val;
     double f_val;
     char* s_val;
-    _Bool boolean;
+    /*_Bool boolean;*/
 }
 
 /* Token without return */
@@ -64,7 +72,7 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 %token ADD SUB MUL DIV MOD INC DEC 
 %token MT LT MTE LTE EQ NE 
 %token AND OR NOT
-%token BREAK CONT RET TRUE FALSE
+%token BREAK CONT RET 
 %token LSB RSB COMMA QUOTA LB RB LCB RCB
 %token ASGN ADDASGN SUBASGN MULASGN DIVASGN MODASGN
 
@@ -72,9 +80,9 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 %token <i_val> I_CONST
 %token <f_val> F_CONST
 %token <s_val> STR_CONST
-%token <s_val> BOOL
+%token <i_val> TRUE FALSE
 
-%token <s_val> INT FLOAT VOID STRING
+%token <s_val> INT FLOAT VOID STRING BOOL
 %token <s_val> ID
 
 /* Nonterminal with return, which need to sepcify type */
@@ -103,8 +111,8 @@ stat
     | print_func
 ;
 
-declaration
-    : type ID ASGN assignment_expression
+ex_declaration
+    : type ID ASGN I_CONST
         {
             if(lookup_symbol($2,'d', 0) == 0){
                 insert_symbol($2, 2, $1, -1, g_scope);
@@ -114,9 +122,57 @@ declaration
                 strcat(error_buf, $2);
                 print_error_flag = 1;
             }
+            ge_field($2,$1,1,$4);
         }
-
-    | type ID 
+    | type ID ASGN F_CONST
+        {
+            if(lookup_symbol($2,'d', 0) == 0){
+                insert_symbol($2, 2, $1, -1, g_scope);
+            } else {
+                // semantic error
+                strcat(error_buf, "Redeclared variable ");
+                strcat(error_buf, $2);
+                print_error_flag = 1;
+            }
+            ge_field($2,$1,2,$4);
+        }
+    | type ID ASGN STR_CONST
+        {
+            if(lookup_symbol($2,'d', 0) == 0){
+                insert_symbol($2, 2, $1, -1, g_scope);
+            } else {
+                // semantic error
+                strcat(error_buf, "Redeclared variable ");
+                strcat(error_buf, $2);
+                print_error_flag = 1;
+            }
+            /*ge_field_s($2,$1,$1,$4);*/
+        }
+    | type ID ASGN TRUE
+        {
+            if(lookup_symbol($2,'d', 0) == 0){
+                insert_symbol($2, 2, $1, -1, g_scope);
+            } else {
+                // semantic error
+                strcat(error_buf, "Redeclared variable ");
+                strcat(error_buf, $2);
+                print_error_flag = 1;
+            }
+            ge_field($2,$1,1,1);
+        }
+    | type ID ASGN FALSE
+        {
+            if(lookup_symbol($2,'d', 0) == 0){
+                insert_symbol($2, 2, $1, -1, g_scope);
+            } else {
+                // semantic error
+                strcat(error_buf, "Redeclared variable ");
+                strcat(error_buf, $2);
+                print_error_flag = 1;
+            }
+            ge_field($2,$1,1,0);
+        }
+    | type ID
         { 
             if(lookup_symbol($2, 'd',0) == 0){
                 insert_symbol($2, 2, $1, -1, g_scope);
@@ -126,6 +182,38 @@ declaration
                 strcat(error_buf, $2);
                 print_error_flag = 1;
             }
+            ge_field($2,$1,-1,0);
+        }
+    ;
+
+declaration
+    : type ID ASGN assignment_expression
+        {
+            struct symbol * now;
+            if(lookup_symbol($2,'d', 0) == 0){
+                now = insert_symbol($2, 2, $1, -1, g_scope);
+            } else {
+                // semantic error
+                strcat(error_buf, "Redeclared variable ");
+                strcat(error_buf, $2);
+                print_error_flag = 1;
+            }
+
+            sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
+        }
+
+    | type ID 
+        { 
+            struct symbol *now;
+            if(lookup_symbol($2, 'd',0) == 0){
+                now = insert_symbol($2, 2, $1, -1, g_scope);
+            } else {
+                // semantic error
+                strcat(error_buf, "Redeclared variable ");
+                strcat(error_buf, $2);
+                print_error_flag = 1;
+            }
+            sprintf(j_buf, "%s\tldc 0\n\tistore %d\n",j_buf, now->index);
         }
 ;
 
@@ -148,17 +236,30 @@ primary_expression
                 strcat(error_buf, $1);
                 print_error_flag = 1;
             }
+            load_var($1);
         }
 	| constant 
-	| STR_CONST
+	| STR_CONST { sprintf(j_buf, "%s\tldc \"%s\"\n", j_buf, yylval.s_val);}
         | LB expression RB
         | TRUE
+            {
+                sprintf(j_buf, "%s\tldc 1\n", j_buf);
+            }
         | FALSE
+            {
+                sprintf(j_buf, "%s\tldc 0\n", j_buf);
+            }
 	;
 
 constant
 	: I_CONST 
+            {
+                sprintf(j_buf, "%s\tldc %d\n", j_buf,yylval.i_val);
+            }
 	| F_CONST 
+            {
+                sprintf(j_buf, "%s\tldc %f\n", j_buf,yylval.f_val);
+            }
 	;
 
 function_expression
@@ -202,7 +303,7 @@ unary_expression
 
 unary_operator
 	: MUL
-	| ADD
+	| ADD 
 	| SUB
 	;
 
@@ -220,7 +321,10 @@ multiplicative_expression
 
 additive_expression
 	: multiplicative_expression
-	| additive_expression ADD multiplicative_expression
+	| additive_expression ADD multiplicative_expression 
+            {
+                sprintf(j_buf, "%s\tiadd\n", j_buf);
+            }
 	| additive_expression SUB multiplicative_expression
 	;
 
@@ -250,7 +354,16 @@ logical_or_expression
 
 assignment_expression
 	: logical_or_expression
-	| unary_expression assignment_operator assignment_expression
+	| ID assignment_operator assignment_expression
+            {
+                //TODO if we can change global variable ('d' -> 'u') 
+                if(store_var($1) == NULL || lookup_symbol($1,'d',0) == 0){ //Undeclare
+                    // semantic error
+                    strcat(error_buf, "Undeclared variable ");
+                    strcat(error_buf, $1);
+                    print_error_flag = 1;
+                }
+            }
 	;
 
 assignment_operator
@@ -355,7 +468,7 @@ jump_stat
 external_declaration
 	: function_definition 
         | function_declaration
-	| declaration_list SEMICOLON
+	| ex_declaration_list SEMICOLON
 	;
 
 function_definition 
@@ -372,6 +485,7 @@ function_definition
                 } else {
                     //err == 2:  has declare function
                 }
+                ge_method($2, $4, $1);
             }
 	| type ID LB RB compound_stat 
             {   
@@ -386,6 +500,7 @@ function_definition
                 } else {
                     //err == 2:  has declare function
                 }
+                ge_method($2,-1,$1);
             }
 	;
 
@@ -425,7 +540,10 @@ function_declaration
             }
         ;
 
-        
+ex_declaration_list
+	: ex_declaration
+	| ex_declaration_list COMMA ex_declaration 
+	;
 
 
 declaration_list
@@ -434,7 +552,21 @@ declaration_list
 	;
 
 print_func
-        : PRINT LB STR_CONST RB SEMICOLON
+        : PRINT LB I_CONST RB SEMICOLON
+            {
+                sprintf(j_buf, "%s\tldc %d", j_buf, $3);
+                sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(I)V\n", j_buf);
+            }
+        | PRINT LB F_CONST RB SEMICOLON
+            {
+                sprintf(j_buf, "%s\tldc %f", j_buf, $3);
+                sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(F)V\n", j_buf);
+            }
+        | PRINT LB STR_CONST RB SEMICOLON
+            {
+                sprintf(j_buf, "%s\tldc %s", j_buf, $3);
+                sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n", j_buf);
+            }
         | PRINT LB ID RB SEMICOLON
             {
                 if(lookup_symbol($3, 'u', 0) == 0){
@@ -443,6 +575,14 @@ print_func
                     strcat(error_buf, $3);
                     print_error_flag = 1;
                 }
+                struct symbol *now = load_var($3);
+                sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(", j_buf);
+                if(now -> type <= 2){ // int or float
+                    sprintf(j_buf, "%s%c)V\n", j_buf, type_i2c(now->type));
+                } else {
+                    sprintf(j_buf, "%sLjava/lang/String;)V\n", j_buf);
+                }
+
             }
         ;
 
@@ -458,12 +598,13 @@ int main(int argc, char** argv)
     file = fopen("compiler_hw3.j", "w");
     fprintf(file,   ".class public compiler_hw3\n"
                     ".super java/lang/Object\n"
-                    ".method public static main([Ljava/lang/String;)V\n");
+                    //".method public static main([Ljava/lang/String;)V\n"
+                    );
     yyparse();
     printf("\nTotal lines: %d \n",yylineno);
 
-    fprintf(file,   "\treturn\n"
-                    ".end method\n");
+    /*fprintf(file,   "\treturn\n"*/
+                    /*".end method\n");*/
 
     fclose(file);
 
@@ -474,7 +615,6 @@ void yyerror(char *s)
 {
     if(strcmp(s, "syntax error") == 0){
         yylineno++;
-        printf("%d: %s\n", yylineno, buf);
         if(print_error_flag == 1){
             yyerror(error_buf);
             memset(error_buf, 0, BUF_SIZE);
@@ -507,7 +647,7 @@ struct symbol_table * create_symbol(int scope) {
     new -> scope = scope;
     return new;
 }
-void insert_symbol(char *name, int kind, int type, int pa, int scope) {
+struct symbol * insert_symbol(char *name, int kind, int type, int pa, int scope) {
     struct symbol_table *t;
     struct symbol *new, *now;
 
@@ -543,7 +683,9 @@ void insert_symbol(char *name, int kind, int type, int pa, int scope) {
     new -> kind = kind;
     new -> type = type;
     new -> parameter = pa;
+    return new;
 }
+
 int lookup_symbol(char * name, int declare_or_use, int define_function_or_not) {
     struct symbol_table *t;
     struct symbol *now;
@@ -630,6 +772,7 @@ void dump_symbol(int scope) {
         printf("%-10d%-10s%-12s%-10s%-10d",
                now -> index, now -> name, KIND[now -> kind], TYPE[now -> type], t -> scope);
         if(now-> kind == 0 && now -> parameter != -1){ //function has parameter
+            // turn the int which store paramamter to a int array
             char tmp[256];
             int out[intlen(now->parameter)];
             sprintf(tmp, "%d", now->parameter);
@@ -683,4 +826,132 @@ void free_table(struct symbol_table *t){
 
     free(t);
 
+}
+
+struct symbol * find_symbol(char *name, int scope){
+    struct symbol * now_symbol;
+    struct symbol_table * now_table;
+    
+    now_table = head -> next;
+
+    while(now_table != NULL && now_table -> scope != scope){
+        now_table = now_table -> next;
+    }
+
+    if(now_table == NULL){ // no such table
+        return NULL;
+    }
+
+    now_symbol = now_table -> child;
+
+    while(now_symbol != NULL && strcmp(now_symbol->name, name) != 0){
+        now_symbol = now_symbol -> next;
+    }
+    
+    return now_symbol;
+}
+
+void ge_field(char *name, int type, int value_type, float value){
+    char t;
+    // TYPE :: 1: int, 2: float, 3: bool, 4: string, 5: void
+    switch(type){
+        case 1:
+            t = 'I';
+            break;
+        case 2: 
+            t = 'F';
+            break;
+        case 3:
+            t = 'Z';
+            break;
+    }
+    // value_type :: -1: none value, 1: no dot(int), 2: has dot(float)
+    fprintf(file, ".field public static %s %c", name, t);
+
+    // turn float to integer
+    if(type == 1 && value_type == 2){
+        value_type = 1;
+    }
+
+    switch(value_type){
+        case -1:
+            fprintf(file, "\n");
+            break;
+        case 1:
+            fprintf(file, " = %d\n", (int)value);
+            break;
+        case 2:
+            fprintf(file, " = %f\n", value);
+            break;
+    }
+}
+
+void ge_method(char *name, int type, int return_type){
+    if(strcmp(name,"main") == 0){
+        fprintf(file, ".method public static main([Ljava/lang/String;)V\n");
+    } else {
+        fprintf(file, ".method public static %s (", name);
+
+        char tmp[256];
+        sprintf(tmp, "%d", type);
+        for(int i = 0; i < strlen(tmp); i++){
+            fprintf(file, "%c", type_i2c(atoi(tmp)));
+        }
+        fprintf(file, ")");
+        fprintf(file, "%c", type_i2c(return_type));
+        fprintf(file, "\n");
+
+    }
+    fprintf(file, ".limit stack 50\n"
+                    ".limit locals 50\n");
+
+    fprintf(file, "%s", j_buf);
+    memset(j_buf, 0, sizeof(j_buf));
+
+    fprintf(file, "\treturn\n"
+                    ".end method\n");
+
+}
+
+struct symbol * load_var(char *name){
+    struct symbol *now = find_symbol(name, g_scope);
+    int t_scope = g_scope;
+    while(t_scope > 0 && now == NULL){
+        t_scope--;
+        now = find_symbol(name, t_scope);
+    }
+    if(t_scope == 0){
+        sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+    } else {
+        sprintf(j_buf, "%s\tiload %d\n", j_buf, now->index);
+    }
+    return now;
+}
+
+struct symbol * store_var(char *name){
+    struct symbol *now = find_symbol(name, g_scope);
+    // if global variable is readonly
+    if(now == NULL){
+        return NULL;
+    } else {
+        sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
+    }
+    return now;
+}
+
+char type_i2c(int type){
+    // TYPE :: 1: int, 2: float, 3: bool, 4: string, 5: void
+    switch(type){
+        case 1: 
+            return 'I';
+        case 2: 
+            return 'F';
+        case 3: 
+            return 'Z';
+        case 4: 
+            return 'S';
+        case 5:
+            return 'V';
+    }
+    return '\0';
 }

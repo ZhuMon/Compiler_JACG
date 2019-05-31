@@ -47,80 +47,80 @@ STR_CONST [\42]({b}|[\134]{any})+[\42]
 
  /* Arithmetic */
 
-"+" 	    {   return ADD; }
-"-"	    {   return SUB; }
-"*"         {   return MUL; }
-"/"         {   return DIV; }
-"%"         {   return MOD; }
-"++"        {   return INC; }
-"--"        {   return DEC; }
+"+" 	    { CONCAT return ADD; }
+"-"	    { CONCAT return SUB; }
+"*"         { CONCAT return MUL; }
+"/"         { CONCAT return DIV; }
+"%"         { CONCAT return MOD; }
+"++"        { CONCAT return INC; }
+"--"        { CONCAT return DEC; }
 
  /* Relational */
-">"         {   return MT; }
-"<"         {   return LT; }
-">="        {   return MTE; }
-"<="        {   return LTE; }
-"=="        {   return EQ; }
-"!="        {   return NE; }
+">"         { CONCAT return MT; }
+"<"         { CONCAT return LT; }
+">="        { CONCAT return MTE; }
+"<="        { CONCAT return LTE; }
+"=="        { CONCAT return EQ; }
+"!="        { CONCAT return NE; }
 
  /* Assignment */
-"="         {   return ASGN; }
-"+="        {   return ADDASGN; }
-"-="        {   return SUBASGN; }
-"*="        {   return MULASGN; }
-"/="        {   return DIVASGN; }
-"%="        {   return MODASGN; }
+"="         { CONCAT return ASGN; }
+"+="        { CONCAT return ADDASGN; }
+"-="        { CONCAT return SUBASGN; }
+"*="        { CONCAT return MULASGN; }
+"/="        { CONCAT return DIVASGN; }
+"%="        { CONCAT return MODASGN; }
 
  /* Logical */
-"&&"        {   return AND; }
-"||"        {   return OR; }
-"!"         {   return NOT; }
+"&&"        { CONCAT return AND; }
+"||"        { CONCAT return OR; }
+"!"         { CONCAT return NOT; }
 
  /* Delimiters */
-"("         {   return LB; }
-")"         {   return RB; }
-"{"         {   return LCB; }
-"}"         {   return RCB; }
-"["         {   return LSB; }
-"]"         {   return RSB; }
-","         {   return COMMA; }
+"("         { CONCAT return LB; }
+")"         { CONCAT return RB; }
+"{"         { CONCAT return LCB; }
+"}"         { CONCAT return RCB; }
+"["         { CONCAT return LSB; }
+"]"         { CONCAT return RSB; }
+","         { CONCAT return COMMA; }
 
  /* Print Keywords */
-"print"     {   return PRINT; }
+"print"     { CONCAT return PRINT; }
 
  /* Condition and Loop Keywords */
-"if"        {   return IF; }
-"else"      {   return ELSE; }
-"for"       {   return FOR; }
-"while"     {   return WHILE; }
+"if"        { CONCAT return IF; }
+"else"      { CONCAT return ELSE; }
+"for"       { CONCAT return FOR; }
+"while"     { CONCAT return WHILE; }
 
  /* Declaration Keywords */
-"void"      {   return VOID; }
-"int"       {   return INT; }
-"float"     {   return FLOAT; }
-"string"    {   return STRING; }
-"bool"      {   return BOOL; }
+"void"      { CONCAT return VOID; }
+"int"       { CONCAT return INT; }
+"float"     { CONCAT return FLOAT; }
+"string"    { CONCAT return STRING; }
+"bool"      { CONCAT return BOOL; }
 
  /* boolean Keywords */
-"true"      {   return TRUE; }
-"false"     {   return FALSE; }
+"true"      { CONCAT return TRUE; }
+"false"     { CONCAT return FALSE; }
 
-"return"    {   return RET; }
+"return"    { CONCAT return RET; }
 
- /*";"         {   return SEMICOLON; }*/
- /*"\""        {   return QUOTA; }*/
+ /*";"         { CONCAT return SEMICOLON; }*/
+ /*"\""        { CONCAT return QUOTA; }*/
 
- /*"continue"  {   return CONT; }*/
- /*"break"     {   return BREAK; }*/
+ /*"continue"  { CONCAT return CONT; }*/
+ /*"break"     { CONCAT return BREAK; }*/
 
  /* String Constant */
-\"                  { BEGIN STRING_STATE; return QUOTA; }
-<STRING_STATE>\"    { BEGIN INITIAL; return QUOTA; }
+\"                  { BEGIN STRING_STATE; CONCAT return QUOTA; }
+<STRING_STATE>\"    { BEGIN INITIAL; CONCAT return QUOTA; }
 <STRING_STATE>[^"]* { yylval.s_val = strdup(yytext); return STR_CONST; }
 
-{number}    { yylval.i_val = atoi(yytext);   return I_CONST; }
-{F_CONST}   { yylval.f_val = atof(yytext);   return F_CONST; }
- /*{STR_CONST} { yylval.s_val = yytext;   return STR_CONST;}*/
+{number}    { yylval.i_val = atoi(yytext); CONCAT return I_CONST; }
+{F_CONST}   { yylval.f_val = atof(yytext); CONCAT return F_CONST; }
+ /*{STR_CONST} { yylval.s_val = yytext; CONCAT return STR_CONST;}*/
 
 
  /* C++ type Comment */
@@ -130,7 +130,7 @@ STR_CONST [\42]({b}|[\134]{any})+[\42]
 {id}	    { /*yylval.s_val = (char*)malloc(sizeof(yytext));
                 strcpy(yylval.s_val,yytext);*/
                 yylval.s_val = strdup(yytext);
-                return ID; }
+                CONCAT return ID; }
 
  /* others */
 [;]         { return SEMICOLON; }
@@ -139,13 +139,13 @@ STR_CONST [\42]({b}|[\134]{any})+[\42]
                     printf("%d:\n", yylineno);
                 } else {
                     printf("%d: %s\n", yylineno, buf); 
-                }
+                }*/
                 print_table();
-                memset(buf, 0, sizeof(buf));*/
+                memset(buf, 0, sizeof(buf));
                 }
 
-[ \t]          {  }
-[^ \t\n]          {  }
+[ \t]          { CONCAT }
+[^ \t\n]          { CONCAT }
 <<EOF>>     { /*dump_symbol(0);*/
                 /*static int once = 0; return once++ ? 0: SEMICOLON;*/
                 return 0;}
