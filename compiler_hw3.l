@@ -114,9 +114,9 @@ STR_CONST [\42]({b}|[\134]{any})+[\42]
  /*"break"     { CONCAT return BREAK; }*/
 
  /* String Constant */
-\"                  { BEGIN STRING_STATE; CONCAT return QUOTA; }
-<STRING_STATE>\"    { BEGIN INITIAL; CONCAT return QUOTA; }
-<STRING_STATE>[^"]* { yylval.s_val = strdup(yytext); return STR_CONST; }
+ \"                  { BEGIN STRING_STATE; CONCAT return QUOTA; }
+ <STRING_STATE>\"    { BEGIN INITIAL; CONCAT return QUOTA; }
+ <STRING_STATE>[^"]* { yylval.s_val = yytext; CONCAT return STR_CONST; }
 
 {number}    { yylval.i_val = atoi(yytext); CONCAT return I_CONST; }
 {F_CONST}   { yylval.f_val = atof(yytext); CONCAT return F_CONST; }

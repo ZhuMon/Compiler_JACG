@@ -11,7 +11,7 @@ extern void yyerror(char*);
 extern char* yytext;   // Get current token from lex
 extern char buf[BUF_SIZE];  // Get current code line from lex
 extern char error_buf[BUF_SIZE]; // Pass error message to lex
-char j_buf[2048]; // Store jasmin code
+char j_buf[65536]; // Store jasmin code
 
 FILE *file; //To generate .j file for Jasmin
 
@@ -52,6 +52,7 @@ int print_table_flag = 0;
 int print_error_flag = 0;
 int left_operand_flag = 0; // to store how many rule has record in j_buf
 int right_operand_flag = 0; // 'F' or 'I'
+int label_num = 0;
 
 char * KIND[3] = {"function", "parameter", "variable"};
 char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
@@ -105,6 +106,12 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 %type <t> cast_expression unary_expression
 %type <t> postfix_expression primary_expression 
 %type <t> function_expression 
+%type <t> block_item_list 
+%type <t> compound_stat
+%type <t> declaration_list declaration
+%type <t> selection_stat iteration_stat jump_stat expression_stat
+%type <t> print_func
+%type <t> stat
 
 /* Yacc will start at this nonterminal */
 %start program
@@ -153,7 +160,7 @@ ex_declaration
             }
             ge_field($2,$1,2,$4);
         }
-    | type ID ASGN STR_CONST
+    | type ID ASGN QUOTA STR_CONST QUOTA
         {
             if(lookup_symbol($2,'d', 0) == 0){
                 insert_symbol($2, 2, $1, -1, g_scope);
@@ -163,7 +170,8 @@ ex_declaration
                 strcat(error_buf, $2);
                 print_error_flag = 1;
             }
-            /*ge_field_s($2,$1,$1,$4);*/
+            // $5 include " , so lost a " to fix
+            fprintf(file, ".field public static %s Ljava/lang/String; = \"%s\n", $2, $5);
         }
     | type ID ASGN TRUE
         {
@@ -209,17 +217,18 @@ declaration
             struct symbol * now;
             if(lookup_symbol($2,'d', 0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
-                if(now->type == 1){
-                    if($<t.type>4 == 'F'){
-                        sprintf(j_buf, "%s\tf2i\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
-                } else if (now->type == 2){
-                    if($<t.type>4 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);
-                }
+                store_var($2,$<t.type>4);
+                /*if(now->type == 1){*/
+                    /*if($<t.type>4 == 'F'){*/
+                        /*sprintf(j_buf, "%s\tf2i\n", j_buf);*/
+                    /*}*/
+                    /*sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);*/
+                /*} else if (now->type == 2){*/
+                    /*if($<t.type>4 == 'I'){*/
+                        /*sprintf(j_buf, "%s\ti2f\n", j_buf);*/
+                    /*}*/
+                    /*sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);*/
+                /*}*/
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -270,9 +279,9 @@ primary_expression
         }
 	| constant 
             {$$ = $1;}
-	| STR_CONST 
+	| QUOTA STR_CONST QUOTA
             { 
-                sprintf(j_buf, "%s\tldc \"%s\"\n", j_buf, yylval.s_val);
+                sprintf(j_buf, "%s\tldc \"%s\n", j_buf, $2);
                 $<t.type>$ = 'S';
                 $<t.pos>$ = strlen(j_buf);
             }
@@ -427,7 +436,6 @@ additive_expression
                     $<t.type>$ = 'I';
                     $<t.pos>$ = strlen(j_buf);
                 } else {
-                    //TODO i2f f2i
                     if($<t.type>1 == 'I'){
                         insert_str2j_buf("\ti2f\n", $<t.pos>1);
                     }
@@ -465,16 +473,124 @@ relational_expression
 	: additive_expression
             {$$ = $1;}
 	| relational_expression LT additive_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'L'+'T';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
+                    $<t.type>$ = 'L'+'T';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	| relational_expression MT additive_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'M'+'T';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
+                    $<t.type>$ = 'M'+'T';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	| relational_expression LTE additive_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'L'+'T'+'E';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
+                    $<t.type>$ = 'L'+'T'+'E';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	| relational_expression MTE additive_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'M'+'T'+'E';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
+                    $<t.type>$ = 'M'+'T'+'E';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	;
 
 equality_expression
 	: relational_expression
             {$$ = $1;}
 	| equality_expression EQ relational_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'E'+'Q';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
+                    $<t.type>$ = 'E'+'Q';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	| equality_expression NE relational_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'N'+'E';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n", j_buf);
+                    $<t.type>$ = 'N'+'E';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	;
 
 logical_and_expression
@@ -520,7 +636,7 @@ assignment_operator
 
 expression
 	: assignment_expression
-	| expression COMMA assignment_expression
+	| expression COMMA assignment_expression { $$ = $3;}
 	;
 
 
@@ -559,8 +675,8 @@ parameter_list
         ;
 
 compound_stat
-	: lcb rcb 
-	| lcb block_item_list rcb 
+	: lcb rcb {$<t.type>$ = 0;}
+	| lcb block_item_list rcb {$$ = $2;}
 	;
 
 lcb
@@ -578,32 +694,158 @@ rcb
 
 block_item_list
 	: stat 
-	| block_item_list stat
+	| block_item_list stat {$$ = $2;}
 	;
 
 expression_stat
 	: SEMICOLON
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| expression SEMICOLON
 	;
 
 selection_stat
 	: IF LB expression RB stat ELSE stat
+            {
+                char tmp[256];
+                switch($<t.type>3){
+                    case 'E'+'Q':
+                        sprintf(tmp, "\tifne Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'N'+'E':
+                        sprintf(tmp, "\tifeq Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'M'+'T':
+                        sprintf(tmp, "\tifle Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'L'+'T':
+                        sprintf(tmp, "\tifge Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'M'+'T'+'E':
+                        sprintf(tmp, "\tiflt Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'L'+'T'+'E':
+                        sprintf(tmp, "\tifgt Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+
+                }
+
+                // above insert str in j_buf, so nead to refresh other
+                $<t.pos>5 += strlen(tmp);
+                $<t.pos>7 += strlen(tmp);
+
+                sprintf(tmp, "\tgoto EXIT_%d\n\tLabel_%d:\n", label_num, label_num);
+                insert_str2j_buf(tmp, $<t.pos>5);
+
+                // above insert str in j_buf, so nead to refresh other
+                $<t.pos>7 += strlen(tmp);
+                sprintf(tmp, "\tEXIT_%d:\n", label_num);
+                insert_str2j_buf(tmp, $<t.pos>7);
+
+                label_num++;
+                $<t.pos>$ = strlen(j_buf);
+            }
 	| IF LB expression RB stat
+            {
+                //TODO
+                char tmp[256];
+                switch($<t.type>3){
+                    case 'E'+'Q':
+                        sprintf(tmp, "\tifne Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'N'+'E':
+                        sprintf(tmp, "\tifeq Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'M'+'T':
+                        sprintf(tmp, "\tifle Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'L'+'T':
+                        sprintf(tmp, "\tifge Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'M'+'T'+'E':
+                        sprintf(tmp, "\tiflt Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'L'+'T'+'E':
+                        sprintf(tmp, "\tifgt Label_%d\n", label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+
+                }
+
+                // above insert str in j_buf, so nead to refresh other
+                $<t.pos>5 += strlen(tmp);
+
+                sprintf(tmp, "\tLabel_%d:\n", label_num);
+                insert_str2j_buf(tmp, $<t.pos>5);
+
+
+                label_num++;
+                $<t.pos>$ = strlen(j_buf);
+            }
 	;
 
 iteration_stat
-	: WHILE LB expression RB stat
+	: WHILE LB expression RB stat 
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| FOR LB expression_stat expression_stat RB stat
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| FOR LB expression_stat expression_stat expression RB stat
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| FOR LB declaration expression_stat RB stat
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| FOR LB declaration expression_stat expression RB stat
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	;
 
 jump_stat
-	: CONT SEMICOLON
+	: CONT SEMICOLON 
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| BREAK SEMICOLON
-	| RET SEMICOLON
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
+	| RET SEMICOLON 
+            {
+                //TODO
+                $<t.type>$ = 0;
+            }
 	| RET expression SEMICOLON
+            {
+                //TODO
+                $$ = $2;
+            }
 	;
 
 
@@ -691,24 +933,29 @@ ex_declaration_list
 
 declaration_list
 	: declaration
-	| declaration_list COMMA declaration
+	| declaration_list COMMA declaration {$$ = $3;}
 	;
 
 print_func
         : PRINT LB I_CONST RB SEMICOLON
             {
-                sprintf(j_buf, "%s\tldc %d", j_buf, $3);
+                sprintf(j_buf, "%s\tldc %d\n", j_buf, $3);
                 sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(I)V\n", j_buf);
+                $<t.pos>$ = strlen(j_buf);
             }
         | PRINT LB F_CONST RB SEMICOLON
             {
-                sprintf(j_buf, "%s\tldc %f", j_buf, $3);
+                sprintf(j_buf, "%s\tldc %f\n", j_buf, $3);
                 sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(F)V\n", j_buf);
+                $<t.pos>$ = strlen(j_buf);
             }
-        | PRINT LB STR_CONST RB SEMICOLON
+        | PRINT LB QUOTA STR_CONST QUOTA RB SEMICOLON
             {
-                sprintf(j_buf, "%s\tldc %s", j_buf, $3);
+                char tmp[256];
+                strncpy(tmp,$4,strlen($4)-3);
+                sprintf(j_buf, "%s\tldc \"%s\"\n", j_buf, tmp);
                 sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n", j_buf);
+                $<t.pos>$ = strlen(j_buf);
             }
         | PRINT LB ID RB SEMICOLON
             {
@@ -726,6 +973,7 @@ print_func
                         sprintf(j_buf, "%sLjava/lang/String;)V\n", j_buf);
                     }
                 }
+                $<t.pos>$ = strlen(j_buf);
 
             }
         ;
@@ -772,9 +1020,12 @@ void yyerror(char *s)
     printf("\n|-----------------------------------------------|\n\n");
     
     //TODO delete file
+    
+    fclose(file);
 
+    
     if(strcmp(s, "syntax error") == 0){
-        exit(0);
+        exit(1);
     }
 
     //exit(-1);
@@ -996,7 +1247,9 @@ struct symbol * find_symbol(char *name, int scope){
     
     return now_symbol;
 }
-
+/*void ge_field_s(char *name, char *value){*/
+    /*fprintf(file, ".field public static %s S = %s", name, value);*/
+/*}*/
 void ge_field(char *name, int type, int value_type, float value){
     char t;
     // TYPE :: 1: int, 2: float, 3: bool, 4: string, 5: void
@@ -1041,7 +1294,11 @@ void ge_method(char *name, int type, int return_type){
         char tmp[256];
         sprintf(tmp, "%d", type);
         for(int i = 0; i < strlen(tmp); i++){
-            fprintf(file, "%c", type_i2c(atoi(tmp)));
+            if(tmp[i] != '4'){ // not string
+                fprintf(file, "%c", type_i2c(tmp[i]-48));
+            } else {
+                fprintf(file, "Ljava/lang/String;");
+            }
         }
         fprintf(file, ")");
         fprintf(file, "%c", type_i2c(return_type));
@@ -1067,12 +1324,18 @@ struct symbol * load_var(char *name){
         now = find_symbol(name, t_scope);
     }
     if(t_scope == 0){
-        sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+        if(now->type != 4){
+            sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+        } else {
+            sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s Ljava/lang/String;\n", j_buf, name);
+        }
     } else {
-        if(now -> type == 1){
+        if(now -> type == 1 || now->type == 3){
             sprintf(j_buf, "%s\tiload %d\n", j_buf, now->index);
         } else if (now -> type == 2){
             sprintf(j_buf, "%s\tfload %d\n", j_buf, now->index);
+        } else if (now -> type == 4){
+            sprintf(j_buf, "%s\taload %d\n", j_buf, now -> index);
         }
     }
     return now;
@@ -1086,9 +1349,13 @@ struct symbol * store_var(char *name, int a_type){
         now = find_symbol(name, t_scope);
     }
     if(t_scope == 0){
-        sprintf(j_buf, "%s\tputstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+        if(now->type != 4){
+            sprintf(j_buf, "%s\tputstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+        } else {
+            sprintf(j_buf, "%s\tputstatic compiler_hw3/%s Ljava/lang/String;\n", j_buf, name);
+        }
     } else {
-        if(now -> type == 1){
+        if(now -> type == 1 || now -> type == 3){ //int or bool
             //f2i
             if(a_type == 'F'){
                 strcat(j_buf, "\tf2i\n");
@@ -1100,6 +1367,8 @@ struct symbol * store_var(char *name, int a_type){
                 strcat(j_buf, "\ti2f\n");
             }
             sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);
+        } else if (now -> type == 4){
+            sprintf(j_buf, "%s\tastore %d\n", j_buf, now->index);
         }
     }
     return now;
@@ -1122,8 +1391,13 @@ char type_i2c(int type){
     return '\0';
 }
 void insert_str2j_buf(char *str, int pos){
-    char tmp[2048];
+    char tmp[65536];
     strcpy(tmp, j_buf);
     memset(j_buf, 0, sizeof(j_buf));
-    sprintf(j_buf, "%s%s%s", strncat(j_buf, tmp, pos), str, tmp+pos);
+    
+    if(pos == strlen(tmp)){
+        sprintf(j_buf, "%s%s", tmp, str);
+    } else {
+        sprintf(j_buf, "%s%s%s", strncat(j_buf, tmp, pos), str, tmp+pos);
+    }
 }
