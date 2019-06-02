@@ -11,7 +11,7 @@ extern void yyerror(char*);
 extern char* yytext;   // Get current token from lex
 extern char buf[BUF_SIZE];  // Get current code line from lex
 extern char error_buf[BUF_SIZE]; // Pass error message to lex
-char j_buf[256]; // Store jasmin code
+char j_buf[2048]; // Store jasmin code
 
 FILE *file; //To generate .j file for Jasmin
 
@@ -1122,7 +1122,7 @@ char type_i2c(int type){
     return '\0';
 }
 void insert_str2j_buf(char *str, int pos){
-    char tmp[256];
+    char tmp[2048];
     strcpy(tmp, j_buf);
     memset(j_buf, 0, sizeof(j_buf));
     sprintf(j_buf, "%s%s%s", strncat(j_buf, tmp, pos), str, tmp+pos);
