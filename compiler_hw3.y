@@ -43,26 +43,35 @@ struct symbol * find_symbol(char *name, int scope);
 void ge_field(char *name, int type, int value_type, float value);
 void ge_method(char *name, int type, int return_type);
 struct symbol * load_var(char *name);
-struct symbol * store_var(char *name);
+struct symbol * store_var(char *name, int a_type);
 char type_i2c(int type);
+void insert_str2j_buf(char *str, int pos);
 
 int g_scope; //for parsing, calculate scope
 int print_table_flag = 0;
 int print_error_flag = 0;
+int left_operand_flag = 0; // to store how many rule has record in j_buf
+int right_operand_flag = 0; // 'F' or 'I'
 
 char * KIND[3] = {"function", "parameter", "variable"};
 char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
+
 
 %}
 
 /* Use variable or self-defined structure to represent
  * nonterminal and token type
  */
+
 %union {
     int i_val;
     double f_val;
     char* s_val;
     /*_Bool boolean;*/
+    struct{
+        int type;
+        int pos; // store the position of rule in j_buf
+    }t;
 }
 
 /* Token without return */
@@ -88,6 +97,14 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 /* Nonterminal with return, which need to sepcify type */
 %type <i_val> type
 %type <i_val> parameter_list 
+%type <t> assignment_expression expression
+%type <t> constant
+%type <t> logical_or_expression logical_and_expression
+%type <t> equality_expression relational_expression 
+%type <t> additive_expression multiplicative_expression
+%type <t> cast_expression unary_expression
+%type <t> postfix_expression primary_expression 
+%type <t> function_expression 
 
 /* Yacc will start at this nonterminal */
 %start program
@@ -192,6 +209,17 @@ declaration
             struct symbol * now;
             if(lookup_symbol($2,'d', 0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
+                if(now->type == 1){
+                    if($<t.type>4 == 'F'){
+                        sprintf(j_buf, "%s\tf2i\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
+                } else if (now->type == 2){
+                    if($<t.type>4 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);
+                }
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -199,7 +227,6 @@ declaration
                 print_error_flag = 1;
             }
 
-            sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
         }
 
     | type ID 
@@ -235,19 +262,32 @@ primary_expression
                 strcat(error_buf, "Undeclared variable ");
                 strcat(error_buf, $1);
                 print_error_flag = 1;
+            } else {
+                struct symbol * now = load_var($1);
+                $<t.type>$ = type_i2c(now -> type);
+                $<t.pos>$ = strlen(j_buf);
             }
-            load_var($1);
         }
 	| constant 
-	| STR_CONST { sprintf(j_buf, "%s\tldc \"%s\"\n", j_buf, yylval.s_val);}
-        | LB expression RB
+            {$$ = $1;}
+	| STR_CONST 
+            { 
+                sprintf(j_buf, "%s\tldc \"%s\"\n", j_buf, yylval.s_val);
+                $<t.type>$ = 'S';
+                $<t.pos>$ = strlen(j_buf);
+            }
+        | LB expression RB { $$ = $2;}
         | TRUE
             {
                 sprintf(j_buf, "%s\tldc 1\n", j_buf);
+                $<t.type>$ = 'Z';
+                $<t.pos>$ = strlen(j_buf);
             }
         | FALSE
             {
                 sprintf(j_buf, "%s\tldc 0\n", j_buf);
+                $<t.type>$ = 'Z';
+                $<t.pos>$ = strlen(j_buf);
             }
 	;
 
@@ -255,10 +295,14 @@ constant
 	: I_CONST 
             {
                 sprintf(j_buf, "%s\tldc %d\n", j_buf,yylval.i_val);
+                $<t.type>$ = 'I';
+                $<t.pos>$ = strlen(j_buf);
             }
 	| F_CONST 
             {
                 sprintf(j_buf, "%s\tldc %f\n", j_buf,yylval.f_val);
+                $<t.type>$ = 'F';
+                $<t.pos>$ = strlen(j_buf);
             }
 	;
 
@@ -283,6 +327,7 @@ function_expression
 
 postfix_expression
 	: primary_expression
+            {$$ = $1;}
         | function_expression
 	| postfix_expression LSB expression RSB
 	| postfix_expression INC
@@ -296,9 +341,10 @@ argument_expression_list
 
 unary_expression
 	: postfix_expression
-	| INC unary_expression
-	| DEC unary_expression
-	| unary_operator cast_expression
+            {$$ = $1;}
+	| INC unary_expression { $$ = $2;}
+	| DEC unary_expression { $$ = $2;}
+	| unary_operator cast_expression { $$ = $2;}
 	;
 
 unary_operator
@@ -309,27 +355,115 @@ unary_operator
 
 cast_expression
 	: unary_expression
+            {$$ = $1;}
 	| LB type RB cast_expression
+            {
+                $<t.type>$ = type_i2c($2);
+            }
 	;
 
 multiplicative_expression
 	: cast_expression
+            {$$ = $1;}
 	| multiplicative_expression MUL cast_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\timuv\n", j_buf);
+                    $<t.type>$ = 'I';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfmul\n", j_buf);
+                    $<t.type>$ = 'F';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	| multiplicative_expression DIV cast_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tidiv\n", j_buf);
+                    $<t.type>$ = 'I';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfdiv\n", j_buf);
+                    $<t.type>$ = 'F';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	| multiplicative_expression MOD cast_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tirem\n", j_buf);
+                    $<t.type>$ = 'I';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    strcat(error_buf, "Mod can only be integer");
+                    print_error_flag = 1;
+                }
+                
+            }
 	;
 
 additive_expression
 	: multiplicative_expression
+            {$$ = $1;}
 	| additive_expression ADD multiplicative_expression 
             {
-                sprintf(j_buf, "%s\tiadd\n", j_buf);
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tiadd\n", j_buf);
+                    $<t.type>$ = 'I';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    //TODO i2f f2i
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfadd\n", j_buf);
+                    $<t.type>$ = 'F';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
             }
 	| additive_expression SUB multiplicative_expression
+            {
+                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                    sprintf(j_buf, "%s\tisub\n", j_buf);
+                    $<t.type>$ = 'I';
+                    $<t.pos>$ = strlen(j_buf);
+                } else {
+                    if($<t.type>1 == 'I'){
+                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
+                    }
+                    if($<t.type>3 == 'I'){
+                        sprintf(j_buf, "%s\ti2f\n", j_buf);
+                    }
+                    sprintf(j_buf, "%s\tfsub\n", j_buf);
+                    $<t.type>$ = 'F';
+                    $<t.pos>$ = strlen(j_buf);
+                }
+                
+            }
 	;
 
 relational_expression
 	: additive_expression
+            {$$ = $1;}
 	| relational_expression LT additive_expression
 	| relational_expression MT additive_expression
 	| relational_expression LTE additive_expression
@@ -338,31 +472,40 @@ relational_expression
 
 equality_expression
 	: relational_expression
+            {$$ = $1;}
 	| equality_expression EQ relational_expression
 	| equality_expression NE relational_expression
 	;
 
 logical_and_expression
         : equality_expression
+            {$$ = $1;}
 	| logical_and_expression AND equality_expression
 	;
 
 logical_or_expression
 	: logical_and_expression
+            {$$ = $1;}
 	| logical_or_expression OR logical_and_expression
 	;
 
 assignment_expression
-	: logical_or_expression
+	: logical_or_expression 
+            {$$ = $1;}
 	| ID assignment_operator assignment_expression
             {
-                //TODO if we can change global variable ('d' -> 'u') 
-                if(store_var($1) == NULL || lookup_symbol($1,'d',0) == 0){ //Undeclare
+                if(lookup_symbol($1,'u',0) == 0){ //Undeclare
                     // semantic error
                     strcat(error_buf, "Undeclared variable ");
                     strcat(error_buf, $1);
                     print_error_flag = 1;
+                } else {
+                    struct symbol *now = store_var($1, $<t.type>3);
+                    // don't care type of $3, because only i==i f==f
+                    $<t.type>$ = type_i2c(now->type);
+                    $<t.pos>$ = strlen(j_buf);
                 }
+
             }
 	;
 
@@ -574,13 +717,14 @@ print_func
                     strcat(error_buf, "Undeclared variable ");
                     strcat(error_buf, $3);
                     print_error_flag = 1;
-                }
-                struct symbol *now = load_var($3);
-                sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(", j_buf);
-                if(now -> type <= 2){ // int or float
-                    sprintf(j_buf, "%s%c)V\n", j_buf, type_i2c(now->type));
                 } else {
-                    sprintf(j_buf, "%sLjava/lang/String;)V\n", j_buf);
+                    struct symbol *now = load_var($3);
+                    sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(", j_buf);
+                    if(now -> type <= 2){ // int or float
+                        sprintf(j_buf, "%s%c)V\n", j_buf, type_i2c(now->type));
+                    } else {
+                        sprintf(j_buf, "%sLjava/lang/String;)V\n", j_buf);
+                    }
                 }
 
             }
@@ -627,11 +771,13 @@ void yyerror(char *s)
     printf("\n| Unmatched token: %s", yytext);
     printf("\n|-----------------------------------------------|\n\n");
     
+    //TODO delete file
+
     if(strcmp(s, "syntax error") == 0){
         exit(0);
     }
 
-    exit(-1);
+    //exit(-1);
 }
 
 struct symbol_table * create_symbol(int scope) {
@@ -923,18 +1069,38 @@ struct symbol * load_var(char *name){
     if(t_scope == 0){
         sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
     } else {
-        sprintf(j_buf, "%s\tiload %d\n", j_buf, now->index);
+        if(now -> type == 1){
+            sprintf(j_buf, "%s\tiload %d\n", j_buf, now->index);
+        } else if (now -> type == 2){
+            sprintf(j_buf, "%s\tfload %d\n", j_buf, now->index);
+        }
     }
     return now;
 }
 
-struct symbol * store_var(char *name){
+struct symbol * store_var(char *name, int a_type){
     struct symbol *now = find_symbol(name, g_scope);
-    // if global variable is readonly
-    if(now == NULL){
-        return NULL;
+    int t_scope = g_scope;
+    while(t_scope > 0 && now == NULL){
+        t_scope--;
+        now = find_symbol(name, t_scope);
+    }
+    if(t_scope == 0){
+        sprintf(j_buf, "%s\tputstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
     } else {
-        sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
+        if(now -> type == 1){
+            //f2i
+            if(a_type == 'F'){
+                strcat(j_buf, "\tf2i\n");
+            }
+            sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
+        } else if (now -> type == 2){
+            //i2f
+            if(a_type == 'I'){
+                strcat(j_buf, "\ti2f\n");
+            }
+            sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);
+        }
     }
     return now;
 }
@@ -954,4 +1120,10 @@ char type_i2c(int type){
             return 'V';
     }
     return '\0';
+}
+void insert_str2j_buf(char *str, int pos){
+    char tmp[256];
+    strcpy(tmp, j_buf);
+    memset(j_buf, 0, sizeof(j_buf));
+    sprintf(j_buf, "%s%s%s", strncat(j_buf, tmp, pos), str, tmp+pos);
 }
