@@ -425,41 +425,15 @@ multiplicative_expression
             {$$ = $1;}
 	| multiplicative_expression MUL cast_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\timuv\n", j_buf);
-                    $<t.type>$ = 'I';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfmul\n", j_buf);
-                    $<t.type>$ = 'F';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'M'+'U'+'V');
+                $<t.type>$ = tmp.type;
+                $<t.pos>$ = tmp.pos;
             }
 	| multiplicative_expression DIV cast_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tidiv\n", j_buf);
-                    $<t.type>$ = 'I';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfdiv\n", j_buf);
-                    $<t.type>$ = 'F';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'D'+'I'+'V');
+                $<t.type>$ = tmp.type;
+                $<t.pos>$ = tmp.pos;
             }
 	| multiplicative_expression MOD cast_expression
             {
@@ -480,41 +454,15 @@ additive_expression
             {$$ = $1;}
 	| additive_expression ADD multiplicative_expression 
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tiadd\n", j_buf);
-                    $<t.type>$ = 'I';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfadd\n", j_buf);
-                    $<t.type>$ = 'F';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'A'+'D'+'D');
+                $<t.type>$ = tmp.type;
+                $<t.pos>$ = tmp.pos;
             }
 	| additive_expression SUB multiplicative_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'I';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n", j_buf);
-                    $<t.type>$ = 'F';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = tmp.type;
+                $<t.pos>$ = tmp.pos;
             }
 	;
 
@@ -523,79 +471,27 @@ relational_expression
             {$$ = $1;}
 	| relational_expression LT additive_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'L'+'T';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
-                    $<t.type>$ = 'L'+'T';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = 'L'+'T';
+                $<t.pos>$ = tmp.pos;
             }
 	| relational_expression MT additive_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'M'+'T';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
-                    $<t.type>$ = 'M'+'T';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = 'M'+'T';
+                $<t.pos>$ = tmp.pos;
             }
 	| relational_expression LTE additive_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'L'+'T'+'E';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
-                    $<t.type>$ = 'L'+'T'+'E';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = 'L'+'T'+'E';
+                $<t.pos>$ = tmp.pos;
             }
 	| relational_expression MTE additive_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'M'+'T'+'E';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
-                    $<t.type>$ = 'M'+'T'+'E';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = 'M'+'T'+'E';
+                $<t.pos>$ = tmp.pos;
             }
 	;
 
@@ -604,41 +500,15 @@ equality_expression
             {$$ = $1;}
 	| equality_expression EQ relational_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'E'+'Q';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n\tf2i\n", j_buf);
-                    $<t.type>$ = 'E'+'Q';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = 'E'+'Q';
+                $<t.pos>$ = tmp.pos;
             }
 	| equality_expression NE relational_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
-                    sprintf(j_buf, "%s\tisub\n", j_buf);
-                    $<t.type>$ = 'N'+'E';
-                    $<t.pos>$ = strlen(j_buf);
-                } else {
-                    if($<t.type>1 == 'I'){
-                        insert_str2j_buf("\ti2f\n", $<t.pos>1);
-                    }
-                    if($<t.type>3 == 'I'){
-                        sprintf(j_buf, "%s\ti2f\n", j_buf);
-                    }
-                    sprintf(j_buf, "%s\tfsub\n", j_buf);
-                    $<t.type>$ = 'N'+'E';
-                    $<t.pos>$ = strlen(j_buf);
-                }
-                
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.type>$ = 'N'+'E';
+                $<t.pos>$ = tmp.pos;
             }
 	;
 
@@ -1067,7 +937,7 @@ print_func
             }
         | PRINT LB QUOTA STR_CONST QUOTA RB SEMICOLON
             {
-                char tmp[256];
+                char tmp[256]={};
                 strncpy(tmp,$4,strlen($4)-3);
                 sprintf(j_buf, "%s\tldc \"%s\"\n", j_buf, tmp);
                 sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(Ljava/lang/String;)V\n", j_buf);
