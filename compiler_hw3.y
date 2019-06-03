@@ -30,6 +30,12 @@ struct symbol_table{
     int scope;
 };
 
+struct t {
+    int type;
+    int pos; // store the position of rule in j_buf
+    int reg; // store what the register use now
+};
+
 struct symbol_table *head;
 /* Symbol table function - you can add new function if needed. */
 int lookup_symbol(char* name, int declare_or_use, int define_function_or_not);
@@ -42,7 +48,9 @@ struct symbol * find_symbol(char *name, int scope);
 
 void ge_field(char *name, int type, int value_type, float value);
 void ge_method(char *name, int type, int return_type);
-struct symbol * load_var(char *name);
+void ge_asgn(char *id, struct t asgn, struct t rhs);
+struct t ge_op(struct t lhs, struct t rhs, int op_type);
+struct symbol * load_var(char *name, int pos);
 struct symbol * store_var(char *name, int a_type);
 char type_i2c(int type);
 void insert_str2j_buf(char *str, int pos);
@@ -54,6 +62,7 @@ int print_error_flag = 0;
 int left_operand_flag = 0; // to store how many rule has record in j_buf
 int right_operand_flag = 0; // 'F' or 'I'
 int label_num = 0;
+int load_pos = 0; // store the last position of load in j_buf
 
 char * KIND[3] = {"function", "parameter", "variable"};
 char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
@@ -101,6 +110,7 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 %type <i_val> type
 %type <i_val> parameter_list
 %type <i_val> while_lb
+%type <t> assignment_operator
 %type <t> assignment_expression expression
 %type <t> constant
 %type <t> logical_or_expression logical_and_expression
@@ -275,7 +285,7 @@ primary_expression
                 strcat(error_buf, $1);
                 print_error_flag = 1;
             } else {
-                struct symbol * now = load_var($1);
+                struct symbol * now = load_var($1, strlen(j_buf));
                 $<t.type>$ = type_i2c(now -> type);
                 $<t.pos>$ = strlen(j_buf);
                 $<t.reg>$ = now -> index;
@@ -655,9 +665,8 @@ assignment_expression
                     strcat(error_buf, $1);
                     print_error_flag = 1;
                 } else {
-                    struct symbol *now = store_var($1, $<t.type>3);
-                    // don't care type of $3, because only i==i f==f
-                    $<t.type>$ = type_i2c(now->type);
+                    ge_asgn($1, *(struct t*)&$2, *(struct t*)&$3);
+                    //$<t.type>$ = now -> type;
                     $<t.pos>$ = strlen(j_buf);
                 }
 
@@ -666,11 +675,35 @@ assignment_expression
 
 assignment_operator
 	: ASGN
+            {
+                $<t.type>$ = 0;
+                $<t.pos>$ = strlen(j_buf);
+            }
 	| MULASGN
+            {
+                $<t.type>$ = 'M'+'U'+'L';
+                $<t.pos>$ = strlen(j_buf);
+            }
 	| DIVASGN
+            {
+                $<t.type>$ = 'D'+'I'+'V';
+                $<t.pos>$ = strlen(j_buf);
+            }
 	| MODASGN
+            {
+                $<t.type>$ = 'M'+'O'+'D';
+                $<t.pos>$ = strlen(j_buf);
+            }
 	| ADDASGN
+            {
+                $<t.type>$ = 'A'+'D'+'D';
+                $<t.pos>$ = strlen(j_buf);
+            }
 	| SUBASGN
+            {
+                $<t.type>$ = 'S'+'U'+'B';
+                $<t.pos>$ = strlen(j_buf);
+            }
 	;
 
 expression
@@ -1048,7 +1081,7 @@ print_func
                     strcat(error_buf, $3);
                     print_error_flag = 1;
                 } else {
-                    struct symbol *now = load_var($3);
+                    struct symbol *now = load_var($3, strlen(j_buf));
                     sprintf(j_buf, "%s\tgetstatic java/lang/System/out Ljava/io/PrintStream;\n\tswap\n\tinvokevirtual java/io/PrintStream/println(", j_buf);
                     if(now -> type <= 2){ // int or float
                         sprintf(j_buf, "%s%c)V\n", j_buf, type_i2c(now->type));
@@ -1398,29 +1431,90 @@ void ge_method(char *name, int type, int return_type){
                     ".end method\n");
 
 }
+void ge_asgn(char *id, struct t asgn, struct t rhs){
+    // asgn.pos means the position of the assignment begin
+    char tmp[2048];
+    if(asgn.type == 0){
+        store_var(id, rhs.type);
+        return;
+    } else {
+        // load
+        struct symbol * now = load_var(id, asgn.pos);
+        
+        struct t lhs; // a += 1 -> a = a + 1 ; second a
+        lhs.type = type_i2c(now -> type);
+        lhs.pos = load_pos;
 
-struct symbol * load_var(char *name){
+        rhs.pos += load_pos - asgn.pos;
+        // generate operator
+        struct t r = ge_op(lhs,rhs,asgn.type);
+        
+        store_var(id, r.type);
+    }
+}
+struct t ge_op(struct t lhs, struct t rhs, int op_type){
+    char tmp[10] = {};
+    char op[10] = {};
+    char buf[256] = {};
+    struct t r;
+    switch(op_type){
+        case 'A'+'D'+'D': strcat(op, "add"); break;
+        case 'S'+'U'+'B': strcat(op, "sub"); break;
+        case 'M'+'U'+'V': strcat(op, "muv"); break;
+        case 'D'+'I'+'V': strcat(op, "div"); break;
+        case 'M'+'O'+'D': strcat(op, "rem"); break;
+    }
+    if(lhs.type == 'I' && rhs.type == 'I'){
+        sprintf(buf, "\ti%s\n", op);
+	insert_str2j_buf(buf, rhs.pos);
+        r.type = 'I';
+        r.pos = rhs.pos+strlen(buf);
+    } else if(lhs.type == 'F' || rhs.type == 'F'){
+        if(lhs.type == 'I'){
+            sprintf(tmp, "\ti2f\n");
+            insert_str2j_buf(tmp, lhs.pos);
+            rhs.pos+=strlen(tmp);
+        }
+        if(rhs.type == 'I'){
+            sprintf(tmp, "\ti2f\n");
+            insert_str2j_buf(tmp, rhs.pos);
+            rhs.pos+=strlen(tmp);
+        }
+        sprintf(buf, "\tf%s\n", op);
+	insert_str2j_buf(buf, rhs.pos);
+        r.type = 'F';
+        r.pos = rhs.pos+strlen(buf);
+    } else {
+        printf("error in asgn\n");
+    }
+    return r;
+}
+
+struct symbol * load_var(char *name, int pos){
     struct symbol *now = find_symbol(name, g_scope);
     int t_scope = g_scope;
+    char tmp[2048];
     while(t_scope > 0 && now == NULL){
         t_scope--;
         now = find_symbol(name, t_scope);
     }
     if(t_scope == 0){
         if(now->type != 4){
-            sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+            sprintf(tmp, "\tgetstatic compiler_hw3/%s %c\n", name, type_i2c(now->type));
         } else {
-            sprintf(j_buf, "%s\tgetstatic compiler_hw3/%s Ljava/lang/String;\n", j_buf, name);
+            sprintf(tmp, "\tgetstatic compiler_hw3/%s Ljava/lang/String;\n", name);
         }
     } else {
         if(now -> type == 1 || now->type == 3){
-            sprintf(j_buf, "%s\tiload %d\n", j_buf, now->index);
+            sprintf(tmp, "\tiload %d\n", now -> index);
         } else if (now -> type == 2){
-            sprintf(j_buf, "%s\tfload %d\n", j_buf, now->index);
+            sprintf(tmp, "\tfload %d\n", now -> index);
         } else if (now -> type == 4){
-            sprintf(j_buf, "%s\taload %d\n", j_buf, now -> index);
+            sprintf(tmp, "\taload %d\n", now -> index);
         }
     }
+    insert_str2j_buf(tmp, pos);
+    load_pos = pos+strlen(tmp);
     return now;
 }
 

@@ -133,20 +133,20 @@ STR_CONST [\42]({b}|[\134]{any})+[\42]
                 CONCAT return ID; }
 
  /* others */
-[;]         { return SEMICOLON; }
+[;]         { CONCAT return SEMICOLON; }
 [\n]	    { //line_num++; 
-                /*if(strlen(buf) == 0){
+                if(strlen(buf) == 0){
                     printf("%d:\n", yylineno);
                 } else {
                     printf("%d: %s\n", yylineno, buf); 
-                }*/
+                }
                 print_table();
                 memset(buf, 0, sizeof(buf));
                 }
 
 [ \t]          { CONCAT }
 [^ \t\n]          { CONCAT }
-<<EOF>>     { /*dump_symbol(0);*/
+<<EOF>>     { dump_symbol(0);
                 /*static int once = 0; return once++ ? 0: SEMICOLON;*/
                 return 0;}
 
