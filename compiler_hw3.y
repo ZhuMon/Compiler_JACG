@@ -46,6 +46,7 @@ struct symbol * load_var(char *name);
 struct symbol * store_var(char *name, int a_type);
 char type_i2c(int type);
 void insert_str2j_buf(char *str, int pos);
+char *get_j_buf(int start, int end);
 
 int g_scope; //for parsing, calculate scope
 int print_table_flag = 0;
@@ -72,6 +73,7 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
     struct{
         int type;
         int pos; // store the position of rule in j_buf
+        int reg; // store what the register use now
     }t;
 }
 
@@ -97,7 +99,8 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 
 /* Nonterminal with return, which need to sepcify type */
 %type <i_val> type
-%type <i_val> parameter_list 
+%type <i_val> parameter_list
+%type <i_val> while_lb
 %type <t> assignment_expression expression
 %type <t> constant
 %type <t> logical_or_expression logical_and_expression
@@ -275,6 +278,7 @@ primary_expression
                 struct symbol * now = load_var($1);
                 $<t.type>$ = type_i2c(now -> type);
                 $<t.pos>$ = strlen(j_buf);
+                $<t.reg>$ = now -> index;
             }
         }
 	| constant 
@@ -340,7 +344,26 @@ postfix_expression
         | function_expression
 	| postfix_expression LSB expression RSB
 	| postfix_expression INC
+            {
+                if($<t.type>1 == 'I'){
+                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n", j_buf, $<t.reg>1);
+                } else if($<t.type>1 == 'F'){
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n", j_buf, $<t.reg>1);
+                }
+                $<t.pos>$ = strlen(j_buf);
+                //TODO has load : add a type in <t>
+                $<t.reg>$ = $<t.reg>1;
+            }
 	| postfix_expression DEC
+            {
+                if($<t.type>1 == 'I'){
+                    sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n", j_buf, $<t.reg>1);
+                } else if($<t.type>1 == 'F'){
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n", j_buf, $<t.reg>1);
+                }
+                $<t.pos>$ = strlen(j_buf); 
+                $<t.reg>$ = $<t.reg>1;
+            }
 	;
 
 argument_expression_list
@@ -351,8 +374,24 @@ argument_expression_list
 unary_expression
 	: postfix_expression
             {$$ = $1;}
-	| INC unary_expression { $$ = $2;}
-	| DEC unary_expression { $$ = $2;}
+	| INC unary_expression 
+            { 
+                if($<t.type>2 == 'I'){
+                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n", j_buf, $<t.reg>1);
+                } else if($<t.type>2 == 'F'){
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n", j_buf, $<t.reg>1);
+                }
+                $<t.pos>$ = strlen(j_buf); 
+            }
+	| DEC unary_expression 
+            { 
+                if($<t.type>2 == 'I'){
+                    sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n", j_buf, $<t.reg>1);
+                } else if($<t.type>2 == 'F'){
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n", j_buf, $<t.reg>1);
+                }
+                $<t.pos>$ = strlen(j_buf); 
+            }
 	| unary_operator cast_expression { $$ = $2;}
 	;
 
@@ -742,12 +781,12 @@ selection_stat
                 $<t.pos>5 += strlen(tmp);
                 $<t.pos>7 += strlen(tmp);
 
-                sprintf(tmp, "\tgoto EXIT_%d\n\tLabel_%d:\n", label_num, label_num);
+                sprintf(tmp, "\tgoto EXIT_%d\nLabel_%d:\n", label_num, label_num);
                 insert_str2j_buf(tmp, $<t.pos>5);
 
                 // above insert str in j_buf, so nead to refresh other
                 $<t.pos>7 += strlen(tmp);
-                sprintf(tmp, "\tEXIT_%d:\n", label_num);
+                sprintf(tmp, "EXIT_%d:\n", label_num);
                 insert_str2j_buf(tmp, $<t.pos>7);
 
                 label_num++;
@@ -755,7 +794,6 @@ selection_stat
             }
 	| IF LB expression RB stat
             {
-                //TODO
                 char tmp[256];
                 switch($<t.type>3){
                     case 'E'+'Q':
@@ -788,7 +826,7 @@ selection_stat
                 // above insert str in j_buf, so nead to refresh other
                 $<t.pos>5 += strlen(tmp);
 
-                sprintf(tmp, "\tLabel_%d:\n", label_num);
+                sprintf(tmp, "Label_%d:\n", label_num);
                 insert_str2j_buf(tmp, $<t.pos>5);
 
 
@@ -797,11 +835,56 @@ selection_stat
             }
 	;
 
+while_lb: LB{
+                $$ = strlen(j_buf);
+            }
+        ;
 iteration_stat
-	: WHILE LB expression RB stat 
+	: WHILE while_lb expression RB stat 
             {
-                //TODO
-                $<t.type>$ = 0;
+                char tmp[256];
+                sprintf(tmp, "Label_%d_BEGIN:\n", label_num);
+                insert_str2j_buf(tmp, $2);
+
+                $<t.pos>3 += strlen(tmp);
+                $<t.pos>5 += strlen(tmp);
+                switch($<t.type>3){
+                    case 'E'+'Q':
+                        sprintf(tmp, "\tifeq Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n", label_num, label_num, label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'N'+'E':
+                        sprintf(tmp, "\tifne Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n",label_num, label_num, label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'M'+'T':
+                        sprintf(tmp, "\tifgt Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n",label_num, label_num, label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'L'+'T':
+                        sprintf(tmp, "\tiflt Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n",label_num, label_num, label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'M'+'T'+'E':
+                        sprintf(tmp, "\tifge Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n",label_num, label_num, label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+                    case 'L'+'T'+'E':
+                        sprintf(tmp, "\tifle Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n",label_num, label_num, label_num);
+                        insert_str2j_buf(tmp, $<t.pos>3);
+                        break;
+
+                }
+
+                // above insert str in j_buf, so nead to refresh other
+                $<t.pos>5 += strlen(tmp);
+
+                sprintf(tmp, "\tgoto Label_%d_BEGIN\nLabel_%d_FALSE:\n\tgoto EXIT_%d\nEXIT_%d:\n", label_num, label_num, label_num, label_num);
+                insert_str2j_buf(tmp, $<t.pos>5);
+
+
+                label_num++;
+                $<t.pos>$ = strlen(j_buf);
             }
 	| FOR LB expression_stat expression_stat RB stat
             {
@@ -1400,4 +1483,9 @@ void insert_str2j_buf(char *str, int pos){
     } else {
         sprintf(j_buf, "%s%s%s", strncat(j_buf, tmp, pos), str, tmp+pos);
     }
+}
+char *get_j_buf(int start, int end){
+    char *tmp;
+    tmp = strndup(j_buf+start, end-start);
+    return tmp;
 }
