@@ -50,8 +50,11 @@ void ge_field(char *name, int type, int value_type, float value);
 void ge_method(char *name, int type, int return_type);
 void ge_asgn(char *id, struct t asgn, struct t rhs);
 struct t ge_op(struct t lhs, struct t rhs, int op_type);
+void ge_call_func(char *name);
+
 struct symbol * load_var(char *name, int pos);
 struct symbol * store_var(char *name, int a_type);
+
 char type_i2c(int type);
 void insert_str2j_buf(char *str, int pos);
 char *get_j_buf(int start, int end);
@@ -337,6 +340,7 @@ function_expression
                 strcat(error_buf, $1);
                 print_error_flag = 1;
             }
+            ge_call_func($1);
             }
         | ID LB argument_expression_list RB {
             if(lookup_symbol($1,'u',0) == 0){ //Undeclare
@@ -345,6 +349,7 @@ function_expression
                 strcat(error_buf, $1);
                 print_error_flag = 1;
             }
+            ge_call_func($1);
         }
         ;
 
@@ -825,11 +830,17 @@ jump_stat
 	| RET SEMICOLON 
             {
                 //TODO
+                sprintf(j_buf, "%s\treturn\n", j_buf);
                 $<t.type>$ = 0;
             }
 	| RET expression SEMICOLON
             {
                 //TODO
+                if($<t.type>2 == 'I'){
+                    sprintf(j_buf, "%s\tireturn\n", j_buf);
+                } else if($<t.type>2 == 'F'){
+                    sprintf(j_buf, "%s\tfreturn\n", j_buf);
+                }
                 $$ = $2;
             }
 	;
@@ -1275,7 +1286,7 @@ void ge_method(char *name, int type, int return_type){
     if(strcmp(name,"main") == 0){
         fprintf(file, ".method public static main([Ljava/lang/String;)V\n");
     } else {
-        fprintf(file, ".method public static %s (", name);
+        fprintf(file, ".method public static %s(", name);
 
         char tmp[256];
         sprintf(tmp, "%d", type);
@@ -1297,8 +1308,7 @@ void ge_method(char *name, int type, int return_type){
     fprintf(file, "%s", j_buf);
     memset(j_buf, 0, sizeof(j_buf));
 
-    fprintf(file, "\treturn\n"
-                    ".end method\n");
+    fprintf(file, ".end method\n");
 
 }
 void ge_asgn(char *id, struct t asgn, struct t rhs){
@@ -1358,6 +1368,21 @@ struct t ge_op(struct t lhs, struct t rhs, int op_type){
         printf("error in asgn\n");
     }
     return r;
+}
+
+void ge_call_func(char *name){
+    sprintf(j_buf, "%s\tinvokestatic compiler_hw3/%s(", j_buf, name);
+    struct symbol *now = find_symbol(name, 0); // find function in scope 0
+    char tmp[256];
+    sprintf(tmp, "%d", now->parameter);
+    for(int i = 0; i < strlen(tmp); i++){
+        if(tmp[i] != '4'){ // not string
+            sprintf(j_buf, "%s%c", j_buf, type_i2c(tmp[i]-48));
+        } else {
+            sprintf(j_buf, "%sLjava/lang/String;", j_buf);
+        }
+    }
+    sprintf(j_buf, "%s)%c\n", j_buf, type_i2c(now->type));
 }
 
 struct symbol * load_var(char *name, int pos){
