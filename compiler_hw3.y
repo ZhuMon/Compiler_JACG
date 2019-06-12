@@ -22,6 +22,8 @@ struct symbol{
     int type; //0: int, 1: float, 2: bool, 3: string, 4: void
     int parameter; // parameter number
     struct symbol *next;
+    int i_val;
+    float f_val;
 };
 
 struct symbol_table{
@@ -34,9 +36,20 @@ struct t {
     int type;
     int pos; // store the position of rule in j_buf
     int reg; // store what the register use now
+    int i_val;
+    float f_val;
+};
+
+struct postfix{
+    int type;
+    char *op;
+    int reg;
+    struct postfix *next;
 };
 
 struct symbol_table *head;
+struct postfix *postfix_head;
+
 /* Symbol table function - you can add new function if needed. */
 int lookup_symbol(char* name, int declare_or_use, int define_function_or_not);
 struct symbol_table *create_symbol(int scope);
@@ -51,6 +64,7 @@ void ge_method(char *name, int type, int return_type);
 void ge_asgn(char *id, struct t asgn, struct t rhs);
 struct t ge_op(struct t lhs, struct t rhs, int op_type);
 void ge_call_func(char *name);
+void ge_back_postfix();
 
 struct symbol * load_var(char *name, int pos);
 struct symbol * store_var(char *name, int a_type);
@@ -58,6 +72,7 @@ struct symbol * store_var(char *name, int a_type);
 char type_i2c(int type);
 void insert_str2j_buf(char *str, int pos);
 char *get_j_buf(int start, int end);
+void add_postfix(int type, char* op, int reg);
 
 int g_scope; //for parsing, calculate scope
 int print_table_flag = 0;
@@ -86,6 +101,8 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
         int type;
         int pos; // store the position of rule in j_buf
         int reg; // store what the register use now
+        int i_val;
+        float f_val;
     }t;
 }
 
@@ -142,7 +159,10 @@ program
 ;
 
 stat
-    : declaration_list SEMICOLON 
+    : declaration_list SEMICOLON
+        {
+            ge_back_postfix();
+        }
     | compound_stat 
     | selection_stat
     | iteration_stat
@@ -155,7 +175,8 @@ ex_declaration
     : type ID ASGN I_CONST
         {
             if(lookup_symbol($2,'d', 0) == 0){
-                insert_symbol($2, 2, $1, -1, g_scope);
+                struct symbol *new = insert_symbol($2, 2, $1, -1, g_scope);
+                new -> i_val = $4;
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -167,7 +188,8 @@ ex_declaration
     | type ID ASGN F_CONST
         {
             if(lookup_symbol($2,'d', 0) == 0){
-                insert_symbol($2, 2, $1, -1, g_scope);
+                struct symbol *new = insert_symbol($2, 2, $1, -1, g_scope);
+                new -> f_val = $4;
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -192,7 +214,8 @@ ex_declaration
     | type ID ASGN TRUE
         {
             if(lookup_symbol($2,'d', 0) == 0){
-                insert_symbol($2, 2, $1, -1, g_scope);
+                struct symbol *new = insert_symbol($2, 2, $1, -1, g_scope);
+                new -> i_val = 1;
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -204,7 +227,8 @@ ex_declaration
     | type ID ASGN FALSE
         {
             if(lookup_symbol($2,'d', 0) == 0){
-                insert_symbol($2, 2, $1, -1, g_scope);
+                struct symbol *new = insert_symbol($2, 2, $1, -1, g_scope);
+                new -> i_val = 0;
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -216,7 +240,9 @@ ex_declaration
     | type ID
         { 
             if(lookup_symbol($2, 'd',0) == 0){
-                insert_symbol($2, 2, $1, -1, g_scope);
+                struct symbol *now = insert_symbol($2, 2, $1, -1, g_scope);
+                now -> f_val = 0;
+                now -> i_val = 0;
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -233,18 +259,21 @@ declaration
             struct symbol * now;
             if(lookup_symbol($2,'d', 0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
+                if(now->type == 1){
+                    if($<t.type>4 == 'F'){
+                        now -> i_val = (int)$<t.f_val>4;
+                    } else {
+                        now -> i_val = $<t.i_val>4;
+                    }
+                } else if (now -> type == 2){
+                    if($<t.type>4 == 'I'){
+                        now -> f_val = $<t.i_val>4;
+                    } else {
+                        now -> i_val = $<t.f_val>4;
+                    }
+
+                }
                 store_var($2,$<t.type>4);
-                /*if(now->type == 1){*/
-                    /*if($<t.type>4 == 'F'){*/
-                        /*sprintf(j_buf, "%s\tf2i\n", j_buf);*/
-                    /*}*/
-                    /*sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);*/
-                /*} else if (now->type == 2){*/
-                    /*if($<t.type>4 == 'I'){*/
-                        /*sprintf(j_buf, "%s\ti2f\n", j_buf);*/
-                    /*}*/
-                    /*sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);*/
-                /*}*/
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -259,6 +288,8 @@ declaration
             struct symbol *now;
             if(lookup_symbol($2, 'd',0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
+                now -> i_val = 0;
+                now -> f_val = 0;
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -292,6 +323,10 @@ primary_expression
                 $<t.type>$ = type_i2c(now -> type);
                 $<t.pos>$ = strlen(j_buf);
                 $<t.reg>$ = now -> index;
+                if(now -> type == 1)
+                    $<t.i_val>$ = now -> i_val;
+                else if(now -> type == 2)
+                    $<t.f_val>$ = now -> f_val;
             }
         }
 	| constant 
@@ -308,12 +343,14 @@ primary_expression
                 sprintf(j_buf, "%s\tldc 1\n", j_buf);
                 $<t.type>$ = 'Z';
                 $<t.pos>$ = strlen(j_buf);
+                $<t.i_val>$ = 1;
             }
         | FALSE
             {
                 sprintf(j_buf, "%s\tldc 0\n", j_buf);
                 $<t.type>$ = 'Z';
                 $<t.pos>$ = strlen(j_buf);
+                $<t.i_val>$ = 0;
             }
 	;
 
@@ -323,12 +360,14 @@ constant
                 sprintf(j_buf, "%s\tldc %d\n", j_buf,yylval.i_val);
                 $<t.type>$ = 'I';
                 $<t.pos>$ = strlen(j_buf);
+                $<t.i_val>$ = yylval.i_val;
             }
 	| F_CONST 
             {
                 sprintf(j_buf, "%s\tldc %f\n", j_buf,yylval.f_val);
                 $<t.type>$ = 'F';
                 $<t.pos>$ = strlen(j_buf);
+                $<t.f_val>$ = yylval.f_val;
             }
 	;
 
@@ -360,24 +399,29 @@ postfix_expression
 	| postfix_expression LSB expression RSB
 	| postfix_expression INC
             {
-                if($<t.type>1 == 'I'){
-                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n", j_buf, $<t.reg>1);
-                } else if($<t.type>1 == 'F'){
-                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n", j_buf, $<t.reg>1);
-                }
-                $<t.pos>$ = strlen(j_buf);
+                add_postfix($<t.type>1, "add", $<t.reg>1);
+
+                $<t.pos>$ = $<t.pos>1;
                 //TODO has load : add a type in <t>
                 $<t.reg>$ = $<t.reg>1;
+                $<t.type>$ = $<t.type>1;
+                if($<t.type>1 == 'I'){
+                    $<t.i_val>$ = $<t.i_val>1;
+                } else if($<t.type>1 == 'F'){
+                    $<t.f_val>$ = $<t.f_val>1;
+                }
             }
 	| postfix_expression DEC
             {
-                if($<t.type>1 == 'I'){
-                    sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n", j_buf, $<t.reg>1);
-                } else if($<t.type>1 == 'F'){
-                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n", j_buf, $<t.reg>1);
-                }
-                $<t.pos>$ = strlen(j_buf); 
+                add_postfix($<t.type>1, "sub", $<t.reg>1);
+                $<t.pos>$ = $<t.pos>1;
                 $<t.reg>$ = $<t.reg>1;
+                $<t.type>$ = $<t.type>1;
+                if($<t.type>1 == 'I'){
+                    $<t.i_val>$ = $<t.i_val>1;
+                } else if($<t.type>1 == 'F'){
+                    $<t.f_val>$ = $<t.f_val>1;
+                }
             }
 	;
 
@@ -392,20 +436,34 @@ unary_expression
 	| INC unary_expression 
             { 
                 if($<t.type>2 == 'I'){
-                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n", j_buf, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n\tiload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
                 } else if($<t.type>2 == 'F'){
-                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n", j_buf, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n\tfload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
                 }
                 $<t.pos>$ = strlen(j_buf); 
+                $<t.reg>$ = $<t.reg>2;
+                $<t.type>$ = $<t.type>2;
+               /* if($<t.type>2 == 'I'){*/
+                    /*$<t.i_val>$ = $<t.i_val>2 + 1;*/
+                /*} else if($<t.type>2 == 'F'){*/
+                    /*$<t.f_val>$ = $<t.f_val>2 + 1;*/
+               /* }*/
             }
 	| DEC unary_expression 
             { 
                 if($<t.type>2 == 'I'){
-                    sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n", j_buf, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n\tiload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
                 } else if($<t.type>2 == 'F'){
-                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n", j_buf, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n\tfload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
                 }
                 $<t.pos>$ = strlen(j_buf); 
+                $<t.reg>$ = $<t.reg>2;
+                $<t.type>$ = $<t.type>2;
+                /*if($<t.type>2 == 'I'){*/
+                    /*$<t.i_val>$ = $<t.i_val>2 - 1;*/
+                /*} else if($<t.type>2 == 'F'){*/
+                    /*$<t.f_val>$ = $<t.f_val>2 - 1;*/
+                /*}*/
             }
 	| unary_operator cast_expression { $$ = $2;}
 	;
@@ -436,6 +494,10 @@ multiplicative_expression
             }
 	| multiplicative_expression DIV cast_expression
             {
+                if(($<t.type>3 == 'I' && $<t.i_val>3 == 0) ||
+                   ($<t.type>3 == 'F' && $<t.f_val>3 == 0)){
+                    yyerror("Divide by 0");
+                }
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'D'+'I'+'V');
                 $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
@@ -650,7 +712,10 @@ expression_stat
                 //TODO
                 $<t.type>$ = 0;
             }
-	| expression SEMICOLON
+	| expression SEMICOLON 
+            {
+                ge_back_postfix();
+            }
 	;
 
 selection_stat
@@ -842,6 +907,7 @@ jump_stat
                     sprintf(j_buf, "%s\tfreturn\n", j_buf);
                 }
                 $$ = $2;
+                ge_back_postfix();
             }
 	;
 
@@ -982,8 +1048,11 @@ int main(int argc, char** argv)
 {
     yylineno = 0;
     head = malloc(sizeof(*head));
-    memset(head, 0, sizeof(struct symbol_table));
+    postfix_head = malloc(sizeof(*postfix_head));
 
+    memset(head, 0, sizeof(struct symbol_table));
+    memset(postfix_head, 0, sizeof(struct postfix));
+    
     file = fopen("compiler_hw3.j", "w");
     fprintf(file,   ".class public compiler_hw3\n"
                     ".super java/lang/Object\n"
@@ -1385,6 +1454,29 @@ void ge_call_func(char *name){
     sprintf(j_buf, "%s)%c\n", j_buf, type_i2c(now->type));
 }
 
+void ge_back_postfix(){
+    struct postfix *now, *prev;
+
+    now = postfix_head -> next;
+    prev = postfix_head;
+    while(now != NULL){
+        
+        if(now -> type == 'I'){
+            sprintf(j_buf, "%s\tiload %d\n\tldc 1\n\ti%s\n\tistore %d\n", j_buf, now -> reg, now -> op, now -> reg);
+        } else if(now -> type == 'F'){
+            sprintf(j_buf, "%s\tfload %d\n\tldc 1.0\n\tf%s\n\tfstore %d\n", j_buf, now -> reg, now -> op, now -> reg);
+        }
+        prev -> next = now -> next;
+        free(now);
+        now = prev -> next;
+        
+        
+    }
+
+    
+
+}
+
 struct symbol * load_var(char *name, int pos){
     struct symbol *now = find_symbol(name, g_scope);
     int t_scope = g_scope;
@@ -1477,4 +1569,19 @@ char *get_j_buf(int start, int end){
     char *tmp;
     tmp = strndup(j_buf+start, end-start);
     return tmp;
+}
+
+void add_postfix(int type, char* op, int reg){
+    struct postfix *new, *now;
+    new = malloc(sizeof(*new));
+    memset(new, 0, sizeof(struct postfix));
+    new -> type = type;
+    new -> op = op;
+    new -> reg = reg;
+
+    now = postfix_head;
+    while(now -> next != NULL){
+        now = now -> next;
+    }
+    now -> next = new;
 }
