@@ -11,7 +11,8 @@ extern void yyerror(char*);
 extern char* yytext;   // Get current token from lex
 extern char buf[BUF_SIZE];  // Get current code line from lex
 extern char error_buf[BUF_SIZE]; // Pass error message to lex
-char j_buf[65536]; // Store jasmin code
+char j_buf[65536]; // Store tab + jasmin code
+char file_buf[65536]; // Store all jasmin code
 
 FILE *file; //To generate .j file for Jasmin
 
@@ -79,6 +80,8 @@ int print_table_flag = 0;
 int print_error_flag = 0;
 int left_operand_flag = 0; // to store how many rule has record in j_buf
 int right_operand_flag = 0; // 'F' or 'I'
+int error_flag = 0;
+
 int label_num = 0;
 int load_pos = 0; // store the last position of load in j_buf
 
@@ -209,7 +212,7 @@ ex_declaration
                 print_error_flag = 1;
             }
             // $5 include " , so lost a " to fix
-            fprintf(file, ".field public static %s Ljava/lang/String; = \"%s\n", $2, $5);
+            sprintf(file_buf, "%s.field public static %s Ljava/lang/String; = \"%s\n", file_buf, $2, $5);
         }
     | type ID ASGN TRUE
         {
@@ -1054,16 +1057,14 @@ int main(int argc, char** argv)
     memset(postfix_head, 0, sizeof(struct postfix));
     
     file = fopen("compiler_hw3.j", "w");
-    fprintf(file,   ".class public compiler_hw3\n"
-                    ".super java/lang/Object\n"
-                    //".method public static main([Ljava/lang/String;)V\n"
-                    );
+    sprintf(file_buf,".class public compiler_hw3\n.super java/lang/Object\n");
     yyparse();
+
     printf("\nTotal lines: %d \n",yylineno);
 
-    /*fprintf(file,   "\treturn\n"*/
-                    /*".end method\n");*/
-
+    if(error_flag == 0){
+        fprintf(file, "%s", file_buf);
+    }
     fclose(file);
 
     return 0;
@@ -1085,16 +1086,14 @@ void yyerror(char *s)
     printf("\n| Unmatched token: %s", yytext);
     printf("\n|-----------------------------------------------|\n\n");
     
-    //TODO delete file
-    
-    fclose(file);
+    //delete file
+    error_flag = 1;
 
     
     if(strcmp(s, "syntax error") == 0){
         exit(1);
     }
 
-    //exit(-1);
 }
 
 struct symbol_table * create_symbol(int scope) {
@@ -1314,7 +1313,7 @@ struct symbol * find_symbol(char *name, int scope){
     return now_symbol;
 }
 /*void ge_field_s(char *name, char *value){*/
-    /*fprintf(file, ".field public static %s S = %s", name, value);*/
+    /*sprintf(file, ".field public static %s S = %s", name, value);*/
 /*}*/
 void ge_field(char *name, int type, int value_type, float value){
     char t;
@@ -1331,7 +1330,7 @@ void ge_field(char *name, int type, int value_type, float value){
             break;
     }
     // value_type :: -1: none value, 1: no dot(int), 2: has dot(float)
-    fprintf(file, ".field public static %s %c", name, t);
+    sprintf(file_buf, "%s.field public static %s %c", file_buf, name, t);
 
     // turn float to integer
     if(type == 1 && value_type == 2){
@@ -1340,44 +1339,41 @@ void ge_field(char *name, int type, int value_type, float value){
 
     switch(value_type){
         case -1:
-            fprintf(file, "\n");
+            sprintf(file_buf, "%s\n", file_buf);
             break;
         case 1:
-            fprintf(file, " = %d\n", (int)value);
+            sprintf(file_buf, "%s = %d\n", file_buf, (int)value);
             break;
         case 2:
-            fprintf(file, " = %f\n", value);
+            sprintf(file_buf, "%s = %f\n", file_buf, value);
             break;
     }
 }
 
 void ge_method(char *name, int type, int return_type){
     if(strcmp(name,"main") == 0){
-        fprintf(file, ".method public static main([Ljava/lang/String;)V\n");
+        sprintf(file_buf, "%s.method public static main([Ljava/lang/String;)V\n", file_buf);
     } else {
-        fprintf(file, ".method public static %s(", name);
+        sprintf(file_buf, "%s.method public static %s(", file_buf, name);
 
         char tmp[256];
         sprintf(tmp, "%d", type);
         for(int i = 0; i < strlen(tmp); i++){
             if(tmp[i] != '4'){ // not string
-                fprintf(file, "%c", type_i2c(tmp[i]-48));
+                sprintf(file_buf, "%s%c", file_buf, type_i2c(tmp[i]-48));
             } else {
-                fprintf(file, "Ljava/lang/String;");
+                sprintf(file_buf, "%sLjava/lang/String;", file_buf);
             }
         }
-        fprintf(file, ")");
-        fprintf(file, "%c", type_i2c(return_type));
-        fprintf(file, "\n");
+        sprintf(file_buf, "%s)%c\n", file_buf, type_i2c(return_type));
 
     }
-    fprintf(file, ".limit stack 50\n"
-                    ".limit locals 50\n");
+    sprintf(file_buf, "%s.limit stack 50\n.limit locals 50\n", file_buf);
 
-    fprintf(file, "%s", j_buf);
+    sprintf(file_buf, "%s%s", file_buf, j_buf);
     memset(j_buf, 0, sizeof(j_buf));
 
-    fprintf(file, ".end method\n");
+    sprintf(file_buf, "%s.end method\n", file_buf);
 
 }
 void ge_asgn(char *id, struct t asgn, struct t rhs){
