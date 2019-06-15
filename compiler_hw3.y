@@ -25,6 +25,8 @@ struct symbol{
     struct symbol *next;
     int i_val;
     float f_val;
+    int has_declared;
+    int has_defined;
 };
 
 struct symbol_table{
@@ -81,6 +83,7 @@ int print_error_flag = 0;
 int left_operand_flag = 0; // to store how many rule has record in j_buf
 int right_operand_flag = 0; // 'F' or 'I'
 int error_flag = 0;
+int call_non_void_function_flag = 0;
 
 int label_num = 0;
 int load_pos = 0; // store the last position of load in j_buf
@@ -133,6 +136,7 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
 %type <i_val> type
 %type <i_val> parameter_list
 %type <i_val> while_lb
+%type <i_val> argument_expression_list
 %type <t> assignment_operator
 %type <t> assignment_expression expression
 %type <t> constant
@@ -263,13 +267,13 @@ declaration
             if(lookup_symbol($2,'d', 0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
                 if(now->type == 1){
-                    if($<t.type>4 == 'F'){
+                    if($<t.type>4 == 2){
                         now -> i_val = (int)$<t.f_val>4;
                     } else {
                         now -> i_val = $<t.i_val>4;
                     }
                 } else if (now -> type == 2){
-                    if($<t.type>4 == 'I'){
+                    if($<t.type>4 == 1){
                         now -> f_val = $<t.i_val>4;
                     } else {
                         now -> i_val = $<t.f_val>4;
@@ -323,7 +327,7 @@ primary_expression
                 print_error_flag = 1;
             } else {
                 struct symbol * now = load_var($1, strlen(j_buf));
-                $<t.type>$ = type_i2c(now -> type);
+                $<t.type>$ = now -> type;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.reg>$ = now -> index;
                 if(now -> type == 1)
@@ -361,14 +365,14 @@ constant
 	: I_CONST 
             {
                 sprintf(j_buf, "%s\tldc %d\n", j_buf,yylval.i_val);
-                $<t.type>$ = 'I';
+                $<t.type>$ = 1;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.i_val>$ = yylval.i_val;
             }
 	| F_CONST 
             {
                 sprintf(j_buf, "%s\tldc %f\n", j_buf,yylval.f_val);
-                $<t.type>$ = 'F';
+                $<t.type>$ = 2;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.f_val>$ = yylval.f_val;
             }
@@ -381,6 +385,16 @@ function_expression
                 strcat(error_buf, "Undeclared function ");
                 strcat(error_buf, $1);
                 print_error_flag = 1;
+            } else {
+                struct symbol *now = find_symbol($1,0);
+                $<t.type>$ = now -> type;
+                if(now -> parameter != -1){
+                    strcat(error_buf, "Function formal parameter is not the same");
+                    print_error_flag = 1;
+                }
+                if(now -> type != 4){ // void
+                    call_non_void_function_flag = 1;
+                }
             }
             ge_call_func($1);
             }
@@ -390,6 +404,16 @@ function_expression
                 strcat(error_buf, "Undeclared function ");
                 strcat(error_buf, $1);
                 print_error_flag = 1;
+            } else {
+                struct symbol *now = find_symbol($1,0);
+                $<t.type>$ = now -> type;
+                if(now -> parameter != $3){
+                    strcat(error_buf, "Function formal parameter is not the same");
+                    print_error_flag = 1;
+                }
+                if(now -> type != 4){ // void
+                    call_non_void_function_flag = 1;
+                }
             }
             ge_call_func($1);
         }
@@ -408,9 +432,9 @@ postfix_expression
                 //TODO has load : add a type in <t>
                 $<t.reg>$ = $<t.reg>1;
                 $<t.type>$ = $<t.type>1;
-                if($<t.type>1 == 'I'){
+                if($<t.type>1 == 1){
                     $<t.i_val>$ = $<t.i_val>1;
-                } else if($<t.type>1 == 'F'){
+                } else if($<t.type>1 == 2){
                     $<t.f_val>$ = $<t.f_val>1;
                 }
             }
@@ -420,9 +444,9 @@ postfix_expression
                 $<t.pos>$ = $<t.pos>1;
                 $<t.reg>$ = $<t.reg>1;
                 $<t.type>$ = $<t.type>1;
-                if($<t.type>1 == 'I'){
+                if($<t.type>1 == 1){
                     $<t.i_val>$ = $<t.i_val>1;
-                } else if($<t.type>1 == 'F'){
+                } else if($<t.type>1 == 2){
                     $<t.f_val>$ = $<t.f_val>1;
                 }
             }
@@ -430,7 +454,13 @@ postfix_expression
 
 argument_expression_list
 	: assignment_expression
+            {
+                $$ = $<t.type>$;
+            }
 	| argument_expression_list COMMA assignment_expression
+            {
+                $$ = $1*10 + $<t.type>3;
+            }
 	;
 
 unary_expression
@@ -438,33 +468,33 @@ unary_expression
             {$$ = $1;}
 	| INC unary_expression 
             { 
-                if($<t.type>2 == 'I'){
+                if($<t.type>2 == 1){
                     sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n\tiload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
-                } else if($<t.type>2 == 'F'){
+                } else if($<t.type>2 == 2){
                     sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n\tfload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
                 }
                 $<t.pos>$ = strlen(j_buf); 
                 $<t.reg>$ = $<t.reg>2;
                 $<t.type>$ = $<t.type>2;
-               /* if($<t.type>2 == 'I'){*/
+               /* if($<t.type>2 == 1){*/
                     /*$<t.i_val>$ = $<t.i_val>2 + 1;*/
-                /*} else if($<t.type>2 == 'F'){*/
+                /*} else if($<t.type>2 == 2){*/
                     /*$<t.f_val>$ = $<t.f_val>2 + 1;*/
                /* }*/
             }
 	| DEC unary_expression 
             { 
-                if($<t.type>2 == 'I'){
+                if($<t.type>2 == 1){
                     sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n\tiload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
-                } else if($<t.type>2 == 'F'){
+                } else if($<t.type>2 == 2){
                     sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n\tfload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
                 }
                 $<t.pos>$ = strlen(j_buf); 
                 $<t.reg>$ = $<t.reg>2;
                 $<t.type>$ = $<t.type>2;
-                /*if($<t.type>2 == 'I'){*/
+                /*if($<t.type>2 == 1){*/
                     /*$<t.i_val>$ = $<t.i_val>2 - 1;*/
-                /*} else if($<t.type>2 == 'F'){*/
+                /*} else if($<t.type>2 == 2){*/
                     /*$<t.f_val>$ = $<t.f_val>2 - 1;*/
                 /*}*/
             }
@@ -482,7 +512,7 @@ cast_expression
             {$$ = $1;}
 	| LB type RB cast_expression
             {
-                $<t.type>$ = type_i2c($2);
+                $<t.type>$ = $2;
             }
 	;
 
@@ -497,8 +527,8 @@ multiplicative_expression
             }
 	| multiplicative_expression DIV cast_expression
             {
-                if(($<t.type>3 == 'I' && $<t.i_val>3 == 0) ||
-                   ($<t.type>3 == 'F' && $<t.f_val>3 == 0)){
+                if(($<t.type>3 == 1 && $<t.i_val>3 == 0) ||
+                   ($<t.type>3 == 2 && $<t.f_val>3 == 0)){
                     yyerror("Divide by 0");
                 }
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'D'+'I'+'V');
@@ -507,9 +537,9 @@ multiplicative_expression
             }
 	| multiplicative_expression MOD cast_expression
             {
-                if($<t.type>1 == 'I' && $<t.type>3 == 'I'){
+                if($<t.type>1 == 1 && $<t.type>3 == 1){
                     sprintf(j_buf, "%s\tirem\n", j_buf);
-                    $<t.type>$ = 'I';
+                    $<t.type>$ = 1;
                     $<t.pos>$ = strlen(j_buf);
                 } else {
                     strcat(error_buf, "Mod can only be integer");
@@ -609,6 +639,9 @@ assignment_expression
                     //$<t.type>$ = now -> type;
                     $<t.pos>$ = strlen(j_buf);
                 }
+                if(call_non_void_function_flag == 1){
+                    call_non_void_function_flag = 0;
+                }
 
             }
 	;
@@ -626,7 +659,7 @@ assignment_operator
             }
 	| DIVASGN
             {
-                $<t.type>$ = 'D'+'I'+'V';
+                $<t.type>$ = 'D'+1+'V';
                 $<t.pos>$ = strlen(j_buf);
             }
 	| MODASGN
@@ -718,6 +751,10 @@ expression_stat
 	| expression SEMICOLON 
             {
                 ge_back_postfix();
+                if(call_non_void_function_flag == 1){
+                    strcat(error_buf, "Function formal parameter is not the same");
+                    print_error_flag = 1;
+                }
             }
 	;
 
@@ -862,26 +899,6 @@ iteration_stat
                 label_num++;
                 $<t.pos>$ = strlen(j_buf);
             }
-	| FOR LB expression_stat expression_stat RB stat
-            {
-                //TODO
-                $<t.type>$ = 0;
-            }
-	| FOR LB expression_stat expression_stat expression RB stat
-            {
-                //TODO
-                $<t.type>$ = 0;
-            }
-	| FOR LB declaration expression_stat RB stat
-            {
-                //TODO
-                $<t.type>$ = 0;
-            }
-	| FOR LB declaration expression_stat expression RB stat
-            {
-                //TODO
-                $<t.type>$ = 0;
-            }
 	;
 
 jump_stat
@@ -904,9 +921,9 @@ jump_stat
 	| RET expression SEMICOLON
             {
                 //TODO
-                if($<t.type>2 == 'I'){
+                if($<t.type>2 == 1){
                     sprintf(j_buf, "%s\tireturn\n", j_buf);
-                } else if($<t.type>2 == 'F'){
+                } else if($<t.type>2 == 2){
                     sprintf(j_buf, "%s\tfreturn\n", j_buf);
                 }
                 $$ = $2;
@@ -926,23 +943,41 @@ function_definition
         : type ID LB parameter_list RB compound_stat 
             {   
                 int err = lookup_symbol($2, 'd', 1);
+                struct symbol *now;
                 if(err == 0){
-                    insert_symbol($2, 0, $1, $4, g_scope);
+                    now = insert_symbol($2, 0, $1, $4, g_scope);
+                    now -> has_defined = 1;
                 } else if(err == 1){
                     // semantic error
                     strcat(error_buf, "Redeclared function ");
                     strcat(error_buf, $2);
                     print_error_flag = 1;
                 } else {
-                    //err == 2:  has declare function
+                    //err == 2:  has declared function
+                    now = find_symbol($2, 0); 
+                    now -> has_defined = 1;
+                    if(now -> parameter != $4 && now -> type != $1){
+                        strcat(error_buf, "1. Function return type is not the same\n");
+                        strcat(error_buf, "| 2. Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> parameter != $4){
+                        strcat(error_buf, "Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> type != $1){
+                        strcat(error_buf, "Function return type is not the same");
+                        print_error_flag = 1;
+                    }
+                    
                 }
                 ge_method($2, $4, $1);
             }
 	| type ID LB RB compound_stat 
             {   
                 int err = lookup_symbol($2, 'd', 1);
+                struct symbol *now;
                 if(err == 0){
-                    insert_symbol($2, 0, $1, -1, g_scope);
+                    now = insert_symbol($2, 0, $1, -1, g_scope);
+                    now -> has_defined = 1;
                 } else if(err == 1){
                     // semantic error
                     strcat(error_buf, "Redeclared function ");
@@ -950,6 +985,19 @@ function_definition
                     print_error_flag = 1;
                 } else {
                     //err == 2:  has declare function
+                    now = find_symbol($2, 0); 
+                    now -> has_defined = 1;
+                    if(now -> parameter != -1 && now -> type != $1){
+                        strcat(error_buf, "1. Function return type is not the same\n");
+                        strcat(error_buf, "| 2. Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> parameter != -1){
+                        strcat(error_buf, "Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> type != $1){
+                        strcat(error_buf, "Function return type is not the same");
+                        print_error_flag = 1;
+                    }
                 }
                 ge_method($2,-1,$1);
             }
@@ -960,33 +1008,67 @@ function_definition
 function_declaration
 	: type ID LB parameter_list RB SEMICOLON
             {
-                if(lookup_symbol($2, 'd', 0) == 0){
-                    insert_symbol($2, 0, $1, $4, g_scope);
-                } else {
+                int err = lookup_symbol($2, 'd', 0);
+                struct symbol *now;
+                if(err == 0){
+                    now = insert_symbol($2, 0, $1, $4, g_scope);
+                    now -> has_declared = 1;
+                } else if(err == 1){
                     // semantic error
                     strcat(error_buf, "Redeclared function ");
                     strcat(error_buf, $2);
                     print_error_flag = 1;
+                } else { //err == 2
+                    now = find_symbol($2, 0);
+                    now -> has_declared = 1;
+                    if(now -> parameter != $4 && now -> type != $1){
+                        strcat(error_buf, "1. Function return type is not the same\n");
+                        strcat(error_buf, "| 2. Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> parameter != $4){
+                        strcat(error_buf, "Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> type != $1){
+                        strcat(error_buf, "Function return type is not the same");
+                        print_error_flag = 1;
+                    }
                 }
 
                 // take out all inserted parameter
-                struct symbol_table *now;
-                now = head -> next;
-                while(now != NULL && now -> scope != g_scope + 1){
-                    now = now -> next;
+                struct symbol_table *now_table;
+                now_table = head -> next;
+                while(now_table != NULL && now_table -> scope != g_scope + 1){
+                    now_table = now_table -> next;
                 }
                 
-                free_table(now);
+                free_table(now_table);
             }
 	| type ID LB RB SEMICOLON
             {
-                if(lookup_symbol($2, 'd', 0) == 0){
-                    insert_symbol($2, 0, $1, -1, g_scope);
-                } else {
+                int err = lookup_symbol($2, 'd', 0);
+                struct symbol *now;
+                if(err == 0){
+                    now = insert_symbol($2, 0, $1, -1, g_scope);
+                    now -> has_declared = 1;
+                } else if(err == 1){
                     // semantic error
                     strcat(error_buf, "Redeclared function ");
                     strcat(error_buf, $2);
                     print_error_flag = 1;
+                } else {  //err == 2
+                    now = find_symbol($2,0);
+                    now -> has_declared = 1;
+                    if(now -> parameter != -1 && now -> type != $1){
+                        strcat(error_buf, "1. Function return type is not the same\n");
+                        strcat(error_buf, "| 2. Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> parameter != -1){
+                        strcat(error_buf, "Function formal parameter is not the same");
+                        print_error_flag = 1;
+                    } else if(now -> type != $1){
+                        strcat(error_buf, "Function return type is not the same");
+                        print_error_flag = 1;
+                    }
                 }
             }
         ;
@@ -1056,16 +1138,16 @@ int main(int argc, char** argv)
     memset(head, 0, sizeof(struct symbol_table));
     memset(postfix_head, 0, sizeof(struct postfix));
     
-    file = fopen("compiler_hw3.j", "w");
     sprintf(file_buf,".class public compiler_hw3\n.super java/lang/Object\n");
     yyparse();
 
     printf("\nTotal lines: %d \n",yylineno);
 
     if(error_flag == 0){
+        file = fopen("compiler_hw3.j", "w");
         fprintf(file, "%s", file_buf);
+        fclose(file);
     }
-    fclose(file);
 
     return 0;
 }
@@ -1083,7 +1165,7 @@ void yyerror(char *s)
     printf("\n|-----------------------------------------------|\n");
     printf("| Error found in line %d: %s\n", yylineno, buf);
     printf("| %s", s);
-    printf("\n| Unmatched token: %s", yytext);
+    /*printf("\n| Unmatched token: %s", yytext);*/
     printf("\n|-----------------------------------------------|\n\n");
     
     //delete file
@@ -1184,8 +1266,20 @@ int lookup_symbol(char * name, int declare_or_use, int define_function_or_not) {
 
         if(now == NULL) {
             continue;
-        }else if(define_function_or_not == 1 && now -> kind == 0) {
-            return 2; // already declare function
+        }else if(now -> kind == 0){
+            if(define_function_or_not == 0){ // declare function
+                if(now -> has_declared == 1){
+                    return 1;
+                } if(now -> has_defined == 1){
+                    return 2;
+                }
+            } else if(define_function_or_not == 1){
+                if(now -> has_defined == 1){
+                    return 1;
+                }else if(now -> has_declared == 1){
+                    return 2;
+                }
+            }
         }
         else {  // the table already has the symbol name
                 
@@ -1387,7 +1481,7 @@ void ge_asgn(char *id, struct t asgn, struct t rhs){
         struct symbol * now = load_var(id, asgn.pos);
         
         struct t lhs; // a += 1 -> a = a + 1 ; second a
-        lhs.type = type_i2c(now -> type);
+        lhs.type = now -> type;
         lhs.pos = load_pos;
 
         rhs.pos += load_pos - asgn.pos;
@@ -1409,25 +1503,25 @@ struct t ge_op(struct t lhs, struct t rhs, int op_type){
         case 'D'+'I'+'V': strcat(op, "div"); break;
         case 'M'+'O'+'D': strcat(op, "rem"); break;
     }
-    if(lhs.type == 'I' && rhs.type == 'I'){
+    if(lhs.type == 1 && rhs.type == 1){
         sprintf(buf, "\ti%s\n", op);
 	insert_str2j_buf(buf, rhs.pos);
-        r.type = 'I';
+        r.type = 1;
         r.pos = rhs.pos+strlen(buf);
-    } else if(lhs.type == 'F' || rhs.type == 'F'){
-        if(lhs.type == 'I'){
+    } else if(lhs.type == 2 || rhs.type == 2){
+        if(lhs.type == 1){
             sprintf(tmp, "\ti2f\n");
             insert_str2j_buf(tmp, lhs.pos);
             rhs.pos+=strlen(tmp);
         }
-        if(rhs.type == 'I'){
+        if(rhs.type == 1){
             sprintf(tmp, "\ti2f\n");
             insert_str2j_buf(tmp, rhs.pos);
             rhs.pos+=strlen(tmp);
         }
         sprintf(buf, "\tf%s\n", op);
 	insert_str2j_buf(buf, rhs.pos);
-        r.type = 'F';
+        r.type = 2;
         r.pos = rhs.pos+strlen(buf);
     } else {
         printf("error in asgn\n");
@@ -1457,9 +1551,9 @@ void ge_back_postfix(){
     prev = postfix_head;
     while(now != NULL){
         
-        if(now -> type == 'I'){
+        if(now -> type == 1){
             sprintf(j_buf, "%s\tiload %d\n\tldc 1\n\ti%s\n\tistore %d\n", j_buf, now -> reg, now -> op, now -> reg);
-        } else if(now -> type == 'F'){
+        } else if(now -> type == 2){
             sprintf(j_buf, "%s\tfload %d\n\tldc 1.0\n\tf%s\n\tfstore %d\n", j_buf, now -> reg, now -> op, now -> reg);
         }
         prev -> next = now -> next;
@@ -1517,13 +1611,13 @@ struct symbol * store_var(char *name, int a_type){
     } else {
         if(now -> type == 1 || now -> type == 3){ //int or bool
             //f2i
-            if(a_type == 'F'){
+            if(a_type == 2){
                 strcat(j_buf, "\tf2i\n");
             }
             sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
         } else if (now -> type == 2){
             //i2f
-            if(a_type == 'I'){
+            if(a_type == 1){
                 strcat(j_buf, "\ti2f\n");
             }
             sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);
