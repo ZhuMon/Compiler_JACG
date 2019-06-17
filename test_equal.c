@@ -34,4 +34,5 @@ int main(){
     } else if(a != b){
         print(b);
     }
+    return;
 }

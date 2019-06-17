@@ -1156,10 +1156,8 @@ int main(int argc, char** argv)
 
 void yyerror(char *s)
 {
-    printf("hi1\n");
     if(strcmp(s, "syntax error") == 0){
         yylineno++;
-        printf("hi\n");
         if(print_error_flag == 1){
             yyerror(error_buf);
             memset(error_buf, 0, BUF_SIZE);

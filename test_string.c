@@ -4,4 +4,5 @@ int main(){
     string b = "hi";
     print(b);
     print("hi");
+    return;
 }
