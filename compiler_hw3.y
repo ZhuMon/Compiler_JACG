@@ -391,12 +391,13 @@ function_expression
                 if(now -> parameter != -1){
                     strcat(error_buf, "Function formal parameter is not the same");
                     print_error_flag = 1;
-                }
-                if(now -> type != 4){ // void
-                    call_non_void_function_flag = 1;
+                } else {
+                    if(now -> type != 4){ // void
+                        call_non_void_function_flag = 1;
+                    }
+                    ge_call_func($1);
                 }
             }
-            ge_call_func($1);
             }
         | ID LB argument_expression_list RB {
             if(lookup_symbol($1,'u',0) == 0){ //Undeclare
@@ -406,16 +407,20 @@ function_expression
                 print_error_flag = 1;
             } else {
                 struct symbol *now = find_symbol($1,0);
+                /*if(now == NULL){*/
+                    /*yyerror("syntax error");*/
+                /*}*/
                 $<t.type>$ = now -> type;
                 if(now -> parameter != $3){
                     strcat(error_buf, "Function formal parameter is not the same");
                     print_error_flag = 1;
-                }
-                if(now -> type != 4){ // void
-                    call_non_void_function_flag = 1;
+                } else {
+                    if(now -> type != 4){ // void
+                        call_non_void_function_flag = 1;
+                    }
+                    ge_call_func($1);
                 }
             }
-            ge_call_func($1);
         }
         ;
 
@@ -684,7 +689,6 @@ expression
 	| expression COMMA assignment_expression { $$ = $3;}
 	;
 
-
 parameter_list
 	: type ID 
             {   
@@ -852,6 +856,7 @@ while_lb: LB{
                 $$ = strlen(j_buf);
             }
         ;
+
 iteration_stat
 	: WHILE while_lb expression RB stat 
             {
@@ -902,7 +907,7 @@ iteration_stat
 	;
 
 jump_stat
-	: CONT SEMICOLON 
+	: CONT SEMICOLON  
             {
                 //TODO
                 $<t.type>$ = 0;
@@ -931,8 +936,6 @@ jump_stat
             }
 	;
 
-
-
 external_declaration
 	: function_definition 
         | function_declaration
@@ -947,6 +950,7 @@ function_definition
                 if(err == 0){
                     now = insert_symbol($2, 0, $1, $4, g_scope);
                     now -> has_defined = 1;
+                    ge_method($2, $4, $1);
                 } else if(err == 1){
                     // semantic error
                     strcat(error_buf, "Redeclared function ");
@@ -966,10 +970,11 @@ function_definition
                     } else if(now -> type != $1){
                         strcat(error_buf, "Function return type is not the same");
                         print_error_flag = 1;
+                    } else {
+                        ge_method($2, $4, $1);
                     }
                     
                 }
-                ge_method($2, $4, $1);
             }
 	| type ID LB RB compound_stat 
             {   
@@ -1002,8 +1007,6 @@ function_definition
                 ge_method($2,-1,$1);
             }
 	;
-
-
 
 function_declaration
 	: type ID LB parameter_list RB SEMICOLON
@@ -1077,7 +1080,6 @@ ex_declaration_list
 	: ex_declaration
 	| ex_declaration_list COMMA ex_declaration 
 	;
-
 
 declaration_list
 	: declaration
@@ -1154,8 +1156,10 @@ int main(int argc, char** argv)
 
 void yyerror(char *s)
 {
+    printf("hi1\n");
     if(strcmp(s, "syntax error") == 0){
         yylineno++;
+        printf("hi\n");
         if(print_error_flag == 1){
             yyerror(error_buf);
             memset(error_buf, 0, BUF_SIZE);

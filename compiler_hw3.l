@@ -122,9 +122,12 @@ STR_CONST [\42]({b}|[\134]{any})+[\42]
 {F_CONST}   { yylval.f_val = atof(yytext); CONCAT return F_CONST; }
  /*{STR_CONST} { yylval.s_val = yytext; CONCAT return STR_CONST;}*/
 
+ /* C type Comment */
+"/*"        { CONCAT comment();}
+
 
  /* C++ type Comment */
-\/\/.*      {   } 
+\/\/.*      { CONCAT } 
 
  /* Variable ID */
 {id}	    { /*yylval.s_val = (char*)malloc(sizeof(yytext));
