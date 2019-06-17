@@ -526,7 +526,7 @@ multiplicative_expression
             {$$ = $1;}
 	| multiplicative_expression MUL cast_expression
             {
-                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'M'+'U'+'V');
+                struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'M'+'U'+'L');
                 $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
@@ -664,7 +664,7 @@ assignment_operator
             }
 	| DIVASGN
             {
-                $<t.type>$ = 'D'+1+'V';
+                $<t.type>$ = 'D'+'I'+'V';
                 $<t.pos>$ = strlen(j_buf);
             }
 	| MODASGN
@@ -1501,7 +1501,7 @@ struct t ge_op(struct t lhs, struct t rhs, int op_type){
     switch(op_type){
         case 'A'+'D'+'D': strcat(op, "add"); break;
         case 'S'+'U'+'B': strcat(op, "sub"); break;
-        case 'M'+'U'+'V': strcat(op, "muv"); break;
+        case 'M'+'U'+'L': strcat(op, "mul"); break;
         case 'D'+'I'+'V': strcat(op, "div"); break;
         case 'M'+'O'+'D': strcat(op, "rem"); break;
     }
