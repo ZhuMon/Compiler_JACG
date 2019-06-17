@@ -1433,6 +1433,11 @@ void ge_field(char *name, int type, int value_type, float value){
         value_type = 1;
     }
 
+    // turn integer to float
+    if(type == 2 && value_type == 1){
+        value_type = 2;
+    }
+
     switch(value_type){
         case -1:
             sprintf(file_buf, "%s\n", file_buf);
