@@ -3,6 +3,13 @@ int main(){
     int a = 8;
     int b = 4;
     
+    while(a>b){
+        print(b);
+        b++;
+    }
+
+    a = 8;
+    b = 4;
     if(a != b){
         print(1);
     }

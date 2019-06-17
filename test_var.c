@@ -23,14 +23,6 @@ int main(){
     float af2 = sqrt(ci);
     float af3 = sqrt(ci) - 5;
 
-    /* Raise semantic error! Undeclared variable */
-    /* b is a undeclared varaible */
-    //int a = b + 5;
-
-    /* Raise semantic error! Redeclared variable */
-    //int a1 = 6;
-    /* a is a redeclared varaible */
-    //int a1 = bi + 5;
     
     return;
 }

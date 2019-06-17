@@ -38,15 +38,17 @@ struct symbol_table{
 struct t {
     int type;
     int pos; // store the position of rule in j_buf
-    int reg; // store what the register use now
+    char *var; // store what the variable use now
     int i_val;
     float f_val;
+    int op_type; // store last operator type that expression use
+    int has_load; // for ++ -- , let others know if load been called
 };
 
 struct postfix{
     int type;
     char *op;
-    int reg;
+    char *var;
     struct postfix *next;
 };
 
@@ -64,18 +66,18 @@ struct symbol * find_symbol(char *name, int scope);
 
 void ge_field(char *name, int type, int value_type, float value);
 void ge_method(char *name, int type, int return_type);
-void ge_asgn(char *id, struct t asgn, struct t rhs);
+struct symbol * ge_asgn(char *id, struct t asgn, struct t rhs);
 struct t ge_op(struct t lhs, struct t rhs, int op_type);
 void ge_call_func(char *name);
-void ge_back_postfix();
+int ge_back_postfix(int pos, int has_load);
 
 struct symbol * load_var(char *name, int pos);
-struct symbol * store_var(char *name, int a_type);
+struct symbol * store_var(char *name, int a_type, int pos);
 
 char type_i2c(int type);
 void insert_str2j_buf(char *str, int pos);
 char *get_j_buf(int start, int end);
-void add_postfix(int type, char* op, int reg);
+void add_postfix(int type, char* op, char *var);
 
 int g_scope; //for parsing, calculate scope
 int print_table_flag = 0;
@@ -87,6 +89,7 @@ int call_non_void_function_flag = 0;
 
 int label_num = 0;
 int load_pos = 0; // store the last position of load in j_buf
+int store_pos = 0; // store the last position of store in j_buf
 
 char * KIND[3] = {"function", "parameter", "variable"};
 char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
@@ -106,9 +109,11 @@ char * TYPE[6] = {"null", "int", "float", "bool", "string", "void"};
     struct{
         int type;
         int pos; // store the position of rule in j_buf
-        int reg; // store what the register use now
+        char *var; // store what the variable use now
         int i_val;
         float f_val;
+        int op_type; // store last operator type that expression use
+        int has_load; // for ++ -- , let others know if load been called
     }t;
 }
 
@@ -168,7 +173,8 @@ program
 stat
     : declaration_list SEMICOLON
         {
-            ge_back_postfix();
+            $$ = $1;
+            $<t.pos>$ += ge_back_postfix($<t.pos>1, $<t.has_load>1);
         }
     | compound_stat 
     | selection_stat
@@ -266,21 +272,21 @@ declaration
             struct symbol * now;
             if(lookup_symbol($2,'d', 0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
-                if(now->type == 1){
+                if(now->type == 1){ 
                     if($<t.type>4 == 2){
                         now -> i_val = (int)$<t.f_val>4;
                     } else {
                         now -> i_val = $<t.i_val>4;
                     }
                 } else if (now -> type == 2){
-                    if($<t.type>4 == 1){
+                    if($<t.type>4 == 1){ 
                         now -> f_val = $<t.i_val>4;
                     } else {
                         now -> i_val = $<t.f_val>4;
                     }
 
                 }
-                store_var($2,$<t.type>4);
+                store_var($2,$<t.type>4, $<t.pos>4);
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
@@ -296,14 +302,15 @@ declaration
             if(lookup_symbol($2, 'd',0) == 0){
                 now = insert_symbol($2, 2, $1, -1, g_scope);
                 now -> i_val = 0;
-                now -> f_val = 0;
+                now -> f_val = 0.0;
+                sprintf(j_buf, "%s\tldc 0\n",j_buf);
+                store_var($2, $1, strlen(j_buf));
             } else {
                 // semantic error
                 strcat(error_buf, "Redeclared variable ");
                 strcat(error_buf, $2);
                 print_error_flag = 1;
             }
-            sprintf(j_buf, "%s\tldc 0\n\tistore %d\n",j_buf, now->index);
         }
 ;
 
@@ -329,7 +336,8 @@ primary_expression
                 struct symbol * now = load_var($1, strlen(j_buf));
                 $<t.type>$ = now -> type;
                 $<t.pos>$ = strlen(j_buf);
-                $<t.reg>$ = now -> index;
+                $<t.var>$ = $1;
+                $<t.has_load>$ = 1;
                 if(now -> type == 1)
                     $<t.i_val>$ = now -> i_val;
                 else if(now -> type == 2)
@@ -341,23 +349,26 @@ primary_expression
 	| QUOTA STR_CONST QUOTA
             { 
                 sprintf(j_buf, "%s\tldc \"%s\n", j_buf, $2);
-                $<t.type>$ = 'S';
+                $<t.type>$ = 4;
                 $<t.pos>$ = strlen(j_buf);
+                $<t.var>$ = NULL;
             }
         | LB expression RB { $$ = $2;}
         | TRUE
             {
                 sprintf(j_buf, "%s\tldc 1\n", j_buf);
-                $<t.type>$ = 'Z';
+                $<t.type>$ = 3;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.i_val>$ = 1;
+                $<t.var>$ = NULL;
             }
         | FALSE
             {
                 sprintf(j_buf, "%s\tldc 0\n", j_buf);
-                $<t.type>$ = 'Z';
+                $<t.type>$ = 3;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.i_val>$ = 0;
+                $<t.var>$ = NULL;
             }
 	;
 
@@ -368,6 +379,7 @@ constant
                 $<t.type>$ = 1;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.i_val>$ = yylval.i_val;
+                $<t.var>$ = NULL;
             }
 	| F_CONST 
             {
@@ -375,6 +387,7 @@ constant
                 $<t.type>$ = 2;
                 $<t.pos>$ = strlen(j_buf);
                 $<t.f_val>$ = yylval.f_val;
+                $<t.var>$ = NULL;
             }
 	;
 
@@ -431,11 +444,11 @@ postfix_expression
 	| postfix_expression LSB expression RSB
 	| postfix_expression INC
             {
-                add_postfix($<t.type>1, "add", $<t.reg>1);
+                add_postfix($<t.type>1, "add", $<t.var>1);
 
                 $<t.pos>$ = $<t.pos>1;
                 //TODO has load : add a type in <t>
-                $<t.reg>$ = $<t.reg>1;
+                $<t.var>$ = $<t.var>1;
                 $<t.type>$ = $<t.type>1;
                 if($<t.type>1 == 1){
                     $<t.i_val>$ = $<t.i_val>1;
@@ -445,9 +458,9 @@ postfix_expression
             }
 	| postfix_expression DEC
             {
-                add_postfix($<t.type>1, "sub", $<t.reg>1);
+                add_postfix($<t.type>1, "sub", $<t.var>1);
                 $<t.pos>$ = $<t.pos>1;
-                $<t.reg>$ = $<t.reg>1;
+                $<t.var>$ = $<t.var>1;
                 $<t.type>$ = $<t.type>1;
                 if($<t.type>1 == 1){
                     $<t.i_val>$ = $<t.i_val>1;
@@ -474,12 +487,14 @@ unary_expression
 	| INC unary_expression 
             { 
                 if($<t.type>2 == 1){
-                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n\tistore %d\n\tiload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1\n\tiadd\n", j_buf);
                 } else if($<t.type>2 == 2){
-                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\nfstore %d\n\tfload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfadd\n", j_buf);
                 }
+                store_var($<t.var>2, $<t.type>2, strlen(j_buf));
+                $<t.has_load>$ = 0;
                 $<t.pos>$ = strlen(j_buf); 
-                $<t.reg>$ = $<t.reg>2;
+                $<t.var>$ = $<t.var>2;
                 $<t.type>$ = $<t.type>2;
                /* if($<t.type>2 == 1){*/
                     /*$<t.i_val>$ = $<t.i_val>2 + 1;*/
@@ -490,12 +505,14 @@ unary_expression
 	| DEC unary_expression 
             { 
                 if($<t.type>2 == 1){
-                    sprintf(j_buf,"%s\tldc 1\n\tisub\n\tistore %d\n\tiload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1\n\tisub\n", j_buf);
                 } else if($<t.type>2 == 2){
-                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\nfstore %d\n\tfload %d\n", j_buf, $<t.reg>1, $<t.reg>1);
+                    sprintf(j_buf,"%s\tldc 1.0\n\tfsub\n", j_buf);
                 }
+                store_var($<t.var>2, $<t.type>2, strlen(j_buf));
+                $<t.has_load>$ = 0;
                 $<t.pos>$ = strlen(j_buf); 
-                $<t.reg>$ = $<t.reg>2;
+                $<t.var>$ = $<t.var>2;
                 $<t.type>$ = $<t.type>2;
                 /*if($<t.type>2 == 1){*/
                     /*$<t.i_val>$ = $<t.i_val>2 - 1;*/
@@ -517,6 +534,7 @@ cast_expression
             {$$ = $1;}
 	| LB type RB cast_expression
             {
+                $$ = $4;
                 $<t.type>$ = $2;
             }
 	;
@@ -527,6 +545,7 @@ multiplicative_expression
 	| multiplicative_expression MUL cast_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'M'+'U'+'L');
+                $<t.has_load>$ = 1;
                 $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
@@ -537,6 +556,7 @@ multiplicative_expression
                     yyerror("Divide by 0");
                 }
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'D'+'I'+'V');
+                $<t.has_load>$ = 1;
                 $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
@@ -544,6 +564,7 @@ multiplicative_expression
             {
                 if($<t.type>1 == 1 && $<t.type>3 == 1){
                     sprintf(j_buf, "%s\tirem\n", j_buf);
+                    $<t.has_load>$ = 1;
                     $<t.type>$ = 1;
                     $<t.pos>$ = strlen(j_buf);
                 } else {
@@ -560,12 +581,14 @@ additive_expression
 	| additive_expression ADD multiplicative_expression 
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'A'+'D'+'D');
+                $<t.has_load>$ = 1;
                 $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	| additive_expression SUB multiplicative_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
+                $<t.has_load>$ = 1;
                 $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
@@ -577,25 +600,33 @@ relational_expression
 	| relational_expression LT additive_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
-                $<t.type>$ = 'L'+'T';
+                $<t.has_load>$ = 1;
+                $<t.op_type>$ = 'L'+'T';
+                $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	| relational_expression MT additive_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
-                $<t.type>$ = 'M'+'T';
+                $<t.has_load>$ = 1;
+                $<t.op_type>$ = 'M'+'T';
+                $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	| relational_expression LTE additive_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
-                $<t.type>$ = 'L'+'T'+'E';
+                $<t.has_load>$ = 1;
+                $<t.op_type>$ = 'L'+'T'+'E';
+                $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	| relational_expression MTE additive_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
-                $<t.type>$ = 'M'+'T'+'E';
+                $<t.has_load>$ = 1;
+                $<t.op_type>$ = 'M'+'T'+'E';
+                $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	;
@@ -606,13 +637,17 @@ equality_expression
 	| equality_expression EQ relational_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
-                $<t.type>$ = 'E'+'Q';
+                $<t.has_load>$ = 1;
+                $<t.op_type>$ = 'E'+'Q';
+                $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	| equality_expression NE relational_expression
             {
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'S'+'U'+'B');
-                $<t.type>$ = 'N'+'E';
+                $<t.has_load>$ = 1;
+                $<t.op_type>$ = 'N'+'E';
+                $<t.type>$ = tmp.type;
                 $<t.pos>$ = tmp.pos;
             }
 	;
@@ -640,8 +675,9 @@ assignment_expression
                     strcat(error_buf, $1);
                     print_error_flag = 1;
                 } else {
-                    ge_asgn($1, *(struct t*)&$2, *(struct t*)&$3);
-                    //$<t.type>$ = now -> type;
+                    struct symbol *now = ge_asgn($1, *(struct t*)&$2, *(struct t*)&$3);
+                    $<t.has_load>$ = 0;
+                    $<t.type>$ = now -> type;
                     $<t.pos>$ = strlen(j_buf);
                 }
                 if(call_non_void_function_flag == 1){
@@ -654,32 +690,32 @@ assignment_expression
 assignment_operator
 	: ASGN
             {
-                $<t.type>$ = 0;
+                $<t.op_type>$ = 0;
                 $<t.pos>$ = strlen(j_buf);
             }
 	| MULASGN
             {
-                $<t.type>$ = 'M'+'U'+'L';
+                $<t.op_type>$ = 'M'+'U'+'L';
                 $<t.pos>$ = strlen(j_buf);
             }
 	| DIVASGN
             {
-                $<t.type>$ = 'D'+'I'+'V';
+                $<t.op_type>$ = 'D'+'I'+'V';
                 $<t.pos>$ = strlen(j_buf);
             }
 	| MODASGN
             {
-                $<t.type>$ = 'M'+'O'+'D';
+                $<t.op_type>$ = 'M'+'O'+'D';
                 $<t.pos>$ = strlen(j_buf);
             }
 	| ADDASGN
             {
-                $<t.type>$ = 'A'+'D'+'D';
+                $<t.op_type>$ = 'A'+'D'+'D';
                 $<t.pos>$ = strlen(j_buf);
             }
 	| SUBASGN
             {
-                $<t.type>$ = 'S'+'U'+'B';
+                $<t.op_type>$ = 'S'+'U'+'B';
                 $<t.pos>$ = strlen(j_buf);
             }
 	;
@@ -754,7 +790,8 @@ expression_stat
             }
 	| expression SEMICOLON 
             {
-                ge_back_postfix();
+                $$ = $1;
+                $<t.pos>$ += ge_back_postfix($<t.pos>1, $<t.has_load>1);
                 if(call_non_void_function_flag == 1){
                     strcat(error_buf, "Function formal parameter is not the same");
                     print_error_flag = 1;
@@ -766,7 +803,7 @@ selection_stat
 	: IF LB expression RB stat ELSE stat
             {
                 char tmp[256];
-                switch($<t.type>3){
+                switch($<t.op_type>3){
                     case 'E'+'Q':
                         sprintf(tmp, "\tifne Label_%d\n", label_num);
                         insert_str2j_buf(tmp, $<t.pos>3);
@@ -812,7 +849,7 @@ selection_stat
 	| IF LB expression RB stat
             {
                 char tmp[256];
-                switch($<t.type>3){
+                switch($<t.op_type>3){
                     case 'E'+'Q':
                         sprintf(tmp, "\tifne Label_%d\n", label_num);
                         insert_str2j_buf(tmp, $<t.pos>3);
@@ -866,7 +903,7 @@ iteration_stat
 
                 $<t.pos>3 += strlen(tmp);
                 $<t.pos>5 += strlen(tmp);
-                switch($<t.type>3){
+                switch($<t.op_type>3){
                     case 'E'+'Q':
                         sprintf(tmp, "\tifeq Label_%d_TRUE\n\tgoto Label_%d_FALSE\nLabel_%d_TRUE:\n", label_num, label_num, label_num);
                         insert_str2j_buf(tmp, $<t.pos>3);
@@ -902,7 +939,7 @@ iteration_stat
 
 
                 label_num++;
-                $<t.pos>$ = strlen(j_buf);
+                $<t.pos>$ = $<t.pos>5+strlen(tmp);
             }
 	;
 
@@ -932,7 +969,7 @@ jump_stat
                     sprintf(j_buf, "%s\tfreturn\n", j_buf);
                 }
                 $$ = $2;
-                ge_back_postfix();
+                $<t.pos>$ += ge_back_postfix($<t.pos>2, $<t.has_load>2);
             }
 	;
 
@@ -1177,7 +1214,6 @@ void yyerror(char *s)
     if(strcmp(s, "syntax error") == 0){
         exit(1);
     }
-
 }
 
 struct symbol_table * create_symbol(int scope) {
@@ -1383,7 +1419,6 @@ void free_table(struct symbol_table *t){
     }
 
     free(t);
-
 }
 
 struct symbol * find_symbol(char *name, int scope){
@@ -1391,7 +1426,6 @@ struct symbol * find_symbol(char *name, int scope){
     struct symbol_table * now_table;
     
     now_table = head -> next;
-
     while(now_table != NULL && now_table -> scope != scope){
         now_table = now_table -> next;
     }
@@ -1408,9 +1442,7 @@ struct symbol * find_symbol(char *name, int scope){
     
     return now_symbol;
 }
-/*void ge_field_s(char *name, char *value){*/
-    /*sprintf(file, ".field public static %s S = %s", name, value);*/
-/*}*/
+
 void ge_field(char *name, int type, int value_type, float value){
     char t;
     // TYPE :: 1: int, 2: float, 3: bool, 4: string, 5: void
@@ -1477,25 +1509,31 @@ void ge_method(char *name, int type, int return_type){
     sprintf(file_buf, "%s.end method\n", file_buf);
 
 }
-void ge_asgn(char *id, struct t asgn, struct t rhs){
+struct symbol * ge_asgn(char *id, struct t asgn, struct t rhs){
     // asgn.pos means the position of the assignment begin
     char tmp[2048];
-    if(asgn.type == 0){
-        store_var(id, rhs.type);
-        return;
-    } else {
+    struct symbol *now;
+    if(asgn.op_type == 0){ // =
+        if(rhs.var != NULL && rhs.has_load == 0){
+            load_var(rhs.var, rhs.pos);
+            rhs.pos = load_pos;
+        }
+        
+        return store_var(id, rhs.type, rhs.pos);
+    } else { // *= /= += -= %=
         // load
         struct symbol * now = load_var(id, asgn.pos);
-        
         struct t lhs; // a += 1 -> a = a + 1 ; second a
         lhs.type = now -> type;
         lhs.pos = load_pos;
+        lhs.var = id;
+        lhs.has_load = 1;
 
         rhs.pos += load_pos - asgn.pos;
         // generate operator
-        struct t r = ge_op(lhs,rhs,asgn.type);
+        struct t r = ge_op(lhs,rhs,asgn.op_type);
         
-        store_var(id, r.type);
+        return store_var(id, r.type, r.pos);
     }
 }
 struct t ge_op(struct t lhs, struct t rhs, int op_type){
@@ -1510,19 +1548,30 @@ struct t ge_op(struct t lhs, struct t rhs, int op_type){
         case 'D'+'I'+'V': strcat(op, "div"); break;
         case 'M'+'O'+'D': strcat(op, "rem"); break;
     }
-    if(lhs.type == 1 && rhs.type == 1){
+    
+    if(lhs.var != NULL && lhs.has_load == 0){
+        load_var(lhs.var, lhs.pos);
+        lhs.pos = load_pos;
+    } 
+
+    if(rhs.var != NULL && rhs.has_load == 0){
+        load_var(rhs.var, rhs.pos);
+        rhs.pos = load_pos;
+    }
+        
+    if(lhs.type == 1 && rhs.type == 1){ // both int
         sprintf(buf, "\ti%s\n", op);
 	insert_str2j_buf(buf, rhs.pos);
         r.type = 1;
         r.pos = rhs.pos+strlen(buf);
-    } else if(lhs.type == 2 || rhs.type == 2){
+    } else if(lhs.type == 2 || rhs.type == 2){ // either float
         if(lhs.type == 1){
             sprintf(tmp, "\ti2f\n");
             insert_str2j_buf(tmp, lhs.pos);
             rhs.pos+=strlen(tmp);
         }
         if(rhs.type == 1){
-            sprintf(tmp, "\ti2f\n");
+            sprintf(tmp, "\ti2f\n"); 
             insert_str2j_buf(tmp, rhs.pos);
             rhs.pos+=strlen(tmp);
         }
@@ -1551,17 +1600,33 @@ void ge_call_func(char *name){
     sprintf(j_buf, "%s)%c\n", j_buf, type_i2c(now->type));
 }
 
-void ge_back_postfix(){
+int ge_back_postfix(int pos, int has_load){
     struct postfix *now, *prev;
-
+    char buf[256];
     now = postfix_head -> next;
     prev = postfix_head;
     while(now != NULL){
         
         if(now -> type == 1){
-            sprintf(j_buf, "%s\tiload %d\n\tldc 1\n\ti%s\n\tistore %d\n", j_buf, now -> reg, now -> op, now -> reg);
+            if(has_load == 0){
+                load_var(now -> var, pos);
+                pos = load_pos;
+            }
+            sprintf(buf, "\tldc 1\n\ti%s\n", now -> op);
+            insert_str2j_buf(buf, pos);
+            pos += strlen(buf);
+            store_var(now -> var, now -> type, pos);
+            pos = store_pos;
         } else if(now -> type == 2){
-            sprintf(j_buf, "%s\tfload %d\n\tldc 1.0\n\tf%s\n\tfstore %d\n", j_buf, now -> reg, now -> op, now -> reg);
+            if(has_load == 0){
+                load_var(now -> var, pos);
+                pos = load_pos;
+            }
+            sprintf(buf, "\tldc 1.0\n\tf%s\n", now -> op);
+            insert_str2j_buf(buf, pos);
+            pos += strlen(buf);
+            store_var(now -> var, now -> type, pos);
+            pos = store_pos;
         }
         prev -> next = now -> next;
         free(now);
@@ -1570,7 +1635,7 @@ void ge_back_postfix(){
         
     }
 
-    
+    return pos;
 
 }
 
@@ -1602,36 +1667,40 @@ struct symbol * load_var(char *name, int pos){
     return now;
 }
 
-struct symbol * store_var(char *name, int a_type){
+struct symbol * store_var(char *name, int a_type, int pos){
     struct symbol *now = find_symbol(name, g_scope);
     int t_scope = g_scope;
+    char tmp[256] = {};
     while(t_scope > 0 && now == NULL){
         t_scope--;
         now = find_symbol(name, t_scope);
     }
     if(t_scope == 0){
         if(now->type != 4){
-            sprintf(j_buf, "%s\tputstatic compiler_hw3/%s %c\n", j_buf, name, type_i2c(now->type));
+            sprintf(tmp, "\tputstatic compiler_hw3/%s %c\n", name, type_i2c(now->type));
         } else {
-            sprintf(j_buf, "%s\tputstatic compiler_hw3/%s Ljava/lang/String;\n", j_buf, name);
+            sprintf(tmp, "\tputstatic compiler_hw3/%s Ljava/lang/String;\n", name);
         }
     } else {
         if(now -> type == 1 || now -> type == 3){ //int or bool
             //f2i
             if(a_type == 2){
-                strcat(j_buf, "\tf2i\n");
+                sprintf(tmp, "\tf2i\n");
             }
-            sprintf(j_buf, "%s\tistore %d\n", j_buf, now->index);
-        } else if (now -> type == 2){
+            sprintf(tmp, "%s\tistore %d\n", tmp, now->index);
+        } else if (now -> type == 2){ // float
             //i2f
             if(a_type == 1){
-                strcat(j_buf, "\ti2f\n");
+                sprintf(tmp, "\ti2f\n");
             }
-            sprintf(j_buf, "%s\tfstore %d\n", j_buf, now->index);
-        } else if (now -> type == 4){
-            sprintf(j_buf, "%s\tastore %d\n", j_buf, now->index);
+            sprintf(tmp, "%s\tfstore %d\n", tmp, now->index);
+        } else if (now -> type == 4){ // string
+            sprintf(tmp, "\tastore %d\n", now->index);
         }
     }
+
+    insert_str2j_buf(tmp, pos);
+    store_pos = pos + strlen(tmp);
     return now;
 }
 
@@ -1668,13 +1737,13 @@ char *get_j_buf(int start, int end){
     return tmp;
 }
 
-void add_postfix(int type, char* op, int reg){
+void add_postfix(int type, char* op, char *var){
     struct postfix *new, *now;
     new = malloc(sizeof(*new));
     memset(new, 0, sizeof(struct postfix));
     new -> type = type;
     new -> op = op;
-    new -> reg = reg;
+    new -> var = var;
 
     now = postfix_head;
     while(now -> next != NULL){
