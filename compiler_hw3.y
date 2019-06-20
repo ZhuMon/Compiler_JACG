@@ -428,7 +428,7 @@ function_expression
                     strcat(error_buf, "Function formal parameter is not the same");
                     print_error_flag = 1;
                 } else {
-                    if(now -> type != 4){ // void
+                    if(now -> type != 5){ // void
                         call_non_void_function_flag = 1;
                     }
                     ge_call_func($1);
@@ -553,7 +553,8 @@ multiplicative_expression
             {
                 if(($<t.type>3 == 1 && $<t.i_val>3 == 0) ||
                    ($<t.type>3 == 2 && $<t.f_val>3 == 0)){
-                    yyerror("Divide by 0");
+                    strcat(error_buf, "Divide by 0");
+                    print_error_flag = 1;
                 }
                 struct t tmp = ge_op(*(struct t*)&$1, *(struct t*)&$3, 'D'+'I'+'V');
                 $<t.has_load>$ = 1;
@@ -795,6 +796,7 @@ expression_stat
                 if(call_non_void_function_flag == 1){
                     strcat(error_buf, "Function formal parameter is not the same");
                     print_error_flag = 1;
+                    call_non_void_function_flag = 0;
                 }
             }
 	;
